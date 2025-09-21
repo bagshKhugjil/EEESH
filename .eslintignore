@@ -1,0 +1,9 @@
+# Build output
+.next/
+out/
+
+# Dependencies
+node_modules/
+
+# Firebase functions (Next.js-д хамаагүй)
+functions/
