@@ -1,4 +1,4 @@
-// functions/src/index.ts (Шинэ функц нэмэгдсэн хувилбар)
+// functions/src/index.ts
 
 import * as functions from "firebase-functions/v1";
 import * as admin from "firebase-admin";
@@ -25,7 +25,7 @@ export const setAdminRole = functions.https.onCall(async (data, context) => {
       "Танд энэ үйлдлийг хийх эрх байхгүй."
     );
   }
-  
+
   try {
     const user = await admin.auth().getUserByEmail(ADMIN_EMAIL);
     await admin.auth().setCustomUserClaims(user.uid, { role: "admin" });
@@ -41,33 +41,61 @@ export const setAdminRole = functions.https.onCall(async (data, context) => {
   }
 });
 
-
 // ------------------------------------------------------------------
 // -- ШИНЭ ФУНКЦ: Шинэ хэрэглэгчийг автоматаар "сурагч" болгох --
 // ------------------------------------------------------------------
 export const createStudentRole = functions.auth.user().onCreate(async (user) => {
-    // 1. Шинэ хэрэглэгчид "student" гэсэн custom claim оноох
-    try {
-        await admin.auth().setCustomUserClaims(user.uid, { role: "student" });
-        console.log(`Successfully set 'student' role for user: ${user.email}`);
-    } catch (error) {
-        console.error(`Error setting custom claim for ${user.email}:`, error);
-    }
+  // 1. Шинэ хэрэглэгчид "student" гэсэн custom claim оноох
+  try {
+    await admin.auth().setCustomUserClaims(user.uid, { role: "student" });
+    console.log(`Successfully set 'student' role for user: ${user.email}`);
+  } catch (error) {
+    console.error(`Error setting custom claim for ${user.email}:`, error);
+  }
 
-    // 2. Firestore-ийн "users" коллекцод хэрэглэгчийн мэдээллийг хадгалах
-    // Энэ нь админ самбарт хэрэглэгчийг харуулахад хэрэгтэй
-    const userRef = admin.firestore().collection("users").doc(user.uid);
-    try {
-        await userRef.set({
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName,
-            photoURL: user.photoURL,
-            role: "student", // Анхны роль
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        console.log(`Successfully created user document for: ${user.email}`);
-    } catch (error) {
-        console.error(`Error creating user document for ${user.email}:`, error);
-    }
+  // 2. Firestore-ийн "users" коллекцод хэрэглэгчийн мэдээллийг хадгалах
+  const userRef = admin.firestore().collection("users").doc(user.uid);
+  try {
+    await userRef.set({
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      role: "student", // Анхны роль
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`Successfully created user document for: ${user.email}`);
+  } catch (error) {
+    console.error(`Error creating user document for ${user.email}:`, error);
+  }
 });
+
+// ------------------------------------------------------------------
+// -- ШИНЭ ФУНКЦ: students collection өөрчлөгдөхөд meta/studentsList update --
+// ------------------------------------------------------------------
+// functions/src/index.ts
+
+export const updateStudentsList = functions.firestore
+  .document("students/{studentId}")
+  .onWrite(async () => {
+    const db = admin.firestore();
+    const snap = await db.collection("students").get();
+
+    const list = snap.docs.map((doc) => {
+      const v = doc.data();
+      return {
+        id: doc.id,
+        externalId: v.externalId ?? null,
+        firstName: v.firstName ?? "",
+        lastName: v.lastName ?? "",
+        class: v.class ?? v.grade ?? "N/A",
+      };
+    });
+
+    await db.collection("meta").doc("studentsList").set({
+      students: list,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log(`✅ Students list updated (${list.length} entries).`);
+  });

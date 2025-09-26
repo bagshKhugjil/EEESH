@@ -6,7 +6,7 @@ import { Header } from "./header";
 export function HeaderWrapper() {
   const pathname = usePathname();
   // нуух шаардлагатай хуудсууд
-  const hideOn = ["/", "/teacher/upload"];
+  const hideOn = ["/", "/teacher/upload","/teacher/files","/teacher/results"];
 
   if (hideOn.includes(pathname)) return null;
   return <Header />;

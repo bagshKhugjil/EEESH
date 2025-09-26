@@ -6,7 +6,12 @@ import { useRouter } from "next/navigation";
 import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase"; // ← өөрийн client Firebase init
 import { useAuth } from "@/components/auth-provider";   // ← танай одоо байгаа AuthProvider
+// дээр нь нэмнэ
+import { getCache, setCache } from "@/lib/cache";
 
+// хүссэн TTL (жишээ нь 5 минут)
+const PROFILE_TTL_MS = 5 * 60 * 1000;
+const RESULTS_TTL_MS = 2 * 60 * 1000; // results богинохон хадгалъя
 const roleToPath = (role?: string | null) => {
   switch (role) {
     case "admin":

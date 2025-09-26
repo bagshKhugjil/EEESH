@@ -1,7 +1,5 @@
 // src/app/teacher/layout.tsx
 
-import { TeacherHeader } from "@/components/teacher-header";
-
 export default function TeacherLayout({
   children,
 }: {

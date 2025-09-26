@@ -64,8 +64,7 @@ export function Header() {
     ];
   } else if (user?.role === 'student') {
     navLinks = [
-        { href: "/student", label: "Нүүр" },
-        { href: "/student/my-results", label: "Миний дүн" },
+        { href: "/student", label: "Нүүр" }
     ];
   }
 

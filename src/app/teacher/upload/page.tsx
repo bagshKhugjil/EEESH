@@ -3,8 +3,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import * as XLSX from "xlsx";
+import { useAuth } from "@/components/auth-provider";
 
 type PartKey = "part1" | "part2";
+type ModalType = "success" | "error" | "warning" | "info";
 
 const SUBJECTS = [
   "ХИМИ",
@@ -17,15 +20,57 @@ const SUBJECTS = [
   "ГАЗАРЗҮЙ",
   "БИОЛОГИ",
   "АНГЛИ ХЭЛ",
-];
+] as const;
+type Subject = (typeof SUBJECTS)[number];
 
-type ModalType = "success" | "error" | "warning" | "info";
+type RawRow = {
+  "Quiz Name"?: string;
+  Class?: string;
+  "ZipGrade ID"?: string | number;
+  "External Id"?: string | number;
+  "First Name"?: string;
+  "Last Name"?: string;
+  "Num Questions"?: string | number;
+  "Num Correct"?: string | number;
+  "Percent Correct"?: string | number;
+};
+
+type ParsedRow = {
+  externalId: string;            // normalized
+  className: string;
+  firstName: string;
+  lastName: string;
+  numQuestions: number | null;
+  numCorrect: number | null;
+  percentCorrect: number | null;
+};
+
+type MergedRow = {
+  externalId: string;
+  className: string;
+  firstName: string;
+  lastName: string;
+  part1?: Omit<ParsedRow, "externalId" | "className" | "firstName" | "lastName">;
+  part2?: Omit<ParsedRow, "externalId" | "className" | "firstName" | "lastName">;
+};
+
+type UploadPayload = {
+  subject: Subject | string;
+  quizName: string;
+  uploadedAt: string; // ISO
+  rows: MergedRow[];
+  sourceFiles: {
+    part1?: string; // filename
+    part2?: string; // filename
+  };
+};
 
 export default function TeacherUploadPage() {
-  // --- THEME: hydration-safe ---
+  const { user } = useAuth();
+
+  // --- THEME / hydration-safe ---
   const [mounted, setMounted] = useState(false);
   const [lightMode, setLightMode] = useState(false);
-
   useEffect(() => {
     setMounted(true);
     const html = document.documentElement;
@@ -38,7 +83,6 @@ export default function TeacherUploadPage() {
       setLightMode(false);
     }
   }, []);
-
   const toggleTheme = () => {
     const next = !lightMode;
     setLightMode(next);
@@ -111,32 +155,136 @@ export default function TeacherUploadPage() {
     handleFileChoose(which, f);
   }, []);
 
-  const readAsDataURL = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result));
-      r.onerror = reject;
-      r.readAsDataURL(file);
+  // ==== Excel/CSV унших, парслэх ====
+  async function readTable(file: File): Promise<ParsedRow[]> {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "" });
+
+    const parsed: ParsedRow[] = rows.map((r) => {
+      const ext = String(r["External Id"] ?? "").trim();
+      const cls = String(r["Class"] ?? "").trim();
+      const fn = String(r["First Name"] ?? "").trim();
+      const ln = String(r["Last Name"] ?? "").trim();
+
+      // тоо руу аюулгүй хөрвүүлэлт
+      const nqRaw = r["Num Questions"];
+      const ncRaw = r["Num Correct"];
+      const pcRaw = r["Percent Correct"];
+
+      const nqNum = nqRaw === "" || nqRaw === undefined ? null : Number(nqRaw);
+      const ncNum = ncRaw === "" || ncRaw === undefined ? null : Number(ncRaw);
+      const pcNum =
+        pcRaw === "" || pcRaw === undefined
+          ? null
+          : Number(String(pcRaw).replace("%", ""));
+
+      return {
+        externalId: ext,
+        className: cls,
+        firstName: fn,
+        lastName: ln,
+        numQuestions: Number.isFinite(nqNum as number) ? (nqNum as number) : null,
+        numCorrect: Number.isFinite(ncNum as number) ? (ncNum as number) : null,
+        percentCorrect: Number.isFinite(pcNum as number) ? (pcNum as number) : null,
+      };
     });
 
+    // externalId хоосон мөрүүдийг авч хаяна
+    return parsed.filter((r) => r.externalId !== "");
+  }
+
+  function mergeParts(p1?: ParsedRow[], p2?: ParsedRow[]): MergedRow[] {
+    const map = new Map<string, MergedRow>();
+
+    const attach = (rows: ParsedRow[], which: "part1" | "part2") => {
+      rows.forEach((r) => {
+        const key = r.externalId;
+        const base =
+          map.get(key) ||
+          {
+            externalId: r.externalId,
+            className: r.className,
+            firstName: r.firstName,
+            lastName: r.lastName,
+          };
+        const payload = {
+          numQuestions: r.numQuestions,
+          numCorrect: r.numCorrect,
+          percentCorrect: r.percentCorrect,
+        };
+        if (which === "part1") (base as MergedRow).part1 = payload;
+        else (base as MergedRow).part2 = payload;
+        map.set(key, base as MergedRow);
+      });
+    };
+
+    if (p1 && p1.length) attach(p1, "part1");
+    if (p2 && p2.length) attach(p2, "part2");
+    return Array.from(map.values());
+  }
+
+  function makeQuizName(subjectName: string, file1?: File | null, file2?: File | null): string {
+    // Файлын нэр + subject + yyyy-mm-dd HH:MM
+    const date = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const ts = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+      date.getHours()
+    )}:${pad(date.getMinutes())}`;
+    const names = [file1?.name, file2?.name].filter(Boolean).join(" & ");
+    return `${subjectName} — ${names || "quiz"} — ${ts}`;
+  }
+
+  // ==== UPLOAD ====
   const doUpload = async () => {
     if (!subject) return openModal("Анхааруулга", "Хичээлээ сонгоно уу!", "warning");
-    if (!filePart1) return openModal("Анхааруулга", "Шалгалтын 1-р хэсгийн файлаа сонгоно уу!", "warning");
+    if (!filePart1) return openModal("Анхааруулга", "1-р хэсгийн файлаа сонгоно уу!", "warning");
+    if (!user) return openModal("Анхааруулга", "Нэвтэрсэн байх шаардлагатай.", "warning");
 
-    setStatus("Хуулж байна…");
+    setStatus("Файл(ууд) уншиж байна…");
     try {
-      const payload = {
+      const p1 = await readTable(filePart1);
+      const p2 = filePart2 ? await readTable(filePart2) : undefined;
+
+      const rows = mergeParts(p1, p2);
+      if (rows.length === 0) {
+        setStatus("");
+        return openModal("Хоосон", "Хүчингүй эсвэл хоосон файл байна.", "warning");
+      }
+
+      const payload: UploadPayload = {
         subject,
-        part1: filePart1 ? { name: filePart1.name, dataURL: await readAsDataURL(filePart1) } : undefined,
-        part2: filePart2 ? { name: filePart2.name, dataURL: await readAsDataURL(filePart2) } : undefined,
+        quizName: makeQuizName(subject, filePart1, filePart2),
+        uploadedAt: new Date().toISOString(),
+        rows,
+        sourceFiles: { part1: filePart1?.name, part2: filePart2?.name },
       };
 
-      // TODO: энд API холбоно (хүсвэл бичээд өгье)
-      // await fetch("/api/teacher/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      setStatus("Сервер рүү илгээж байна…");
+      const token = await user.getIdToken();
+      const res = await fetch("/api/teacher/upload", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      type ApiResp =
+        | { ok: true; quizId: string; inserted: number; updated: number }
+        | { ok: false; error: string };
+
+      const data: ApiResp = await res.json();
+      if (!res.ok || !("ok" in data) || data.ok !== true) {
+        const msg = "error" in data ? data.error : "Серверийн алдаа.";
+        throw new Error(msg);
+      }
 
       openModal(
         "Амжилттай",
-        `“${subject}” хичээлийн${filePart2 ? " 1 ба 2-р хэсгийн" : " 1-р хэсгийн"} файл хүлээн авлаа.`,
+        `“${payload.quizName}” илгээгдлээ. Нийт ${data.inserted + data.updated} мөр.`,
         "success"
       );
 
@@ -159,7 +307,7 @@ export default function TeacherUploadPage() {
   const modalTitleColor =
     modalType === "success" ? (isLight ? "#10b981" : "#9af5e3")
     : modalType === "error" ? (isLight ? "#ef4444" : "#ff8b8b")
-    : modalType === "warning" ? (isLight ? "#f59e0b" : "#ffc97a")
+    : modalType === "warning" ? (isLight ? "#f59e0b" : "#ffc97а")
     : "var(--text)";
 
   return (
@@ -173,14 +321,11 @@ export default function TeacherUploadPage() {
           title="Өнгө солих"
           aria-label="Өнгө солих"
         >
-          {/* Hydration-safe: mounted болмогц icon-оо үзүүлнэ */}
           {!mounted ? null : lightMode ? (
-            // moon
             <svg className="m-auto" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           ) : (
-            // sun
             <svg className="m-auto" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="5"></circle>
               <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -196,7 +341,7 @@ export default function TeacherUploadPage() {
         </button>
       </div>
 
-      {/* Inline nav (энэнд глобал Header-н оронд энэ хуудасны навигци) */}
+      {/* Inline nav */}
       <div className="header text-center pt-4">
         <div
           className="inline-flex gap-2 p-2 rounded-xl"
@@ -308,14 +453,12 @@ export default function TeacherUploadPage() {
             </div>
           </div>
 
-          {/* status */}
           {!!status && (
             <div id="status" className="mt-3 text-sm" style={{ color: "orange" }}>
               {status}
             </div>
           )}
 
-          {/* footer buttons */}
           <div className="footer mt-4 flex items-center justify-end gap-3">
             <a
               className="btn sample rounded-xl font-bold px-4 py-2"
