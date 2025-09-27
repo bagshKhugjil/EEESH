@@ -20,11 +20,11 @@ const SUBJECTS = [
 type Subject = (typeof SUBJECTS)[number];
 
 type QuizItem = {
-  id: string;                 // firestore doc id
-  quizId: string;             // == id
+  id: string;
+  quizId: string;
   quizName: string;
   subject: string;
-  uploadedAt: string;         // ISO
+  uploadedAt: string;
   uploadedByEmail: string | null;
   sourceFiles?: { part1?: string; part2?: string };
 };
@@ -45,6 +45,7 @@ export default function TeacherFilesPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const [q, setQ] = useState(""); // client-side search
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return items;
@@ -81,7 +82,6 @@ export default function TeacherFilesPage() {
     title: "",
     message: "",
   });
-
   const openConfirm = (title: string, message: string, onConfirm: () => void) =>
     setModal({ open: true, title, message, onConfirm });
   const closeModal = () => setModal((m) => ({ ...m, open: false }));
@@ -130,12 +130,12 @@ export default function TeacherFilesPage() {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
+    <div className="min-h-dvh" style={{ background: "var(--bg)", color: "var(--text)" }}>
       {/* Theme toggle */}
-      <div className="fixed top-4 right-4 z-[999]">
+      <div className="fixed top-3 right-3 z-[999]">
         <button
           onClick={toggleTheme}
-          className="w-11 h-11 rounded-full border"
+          className="w-10 h-10 rounded-full border flex items-center justify-center"
           style={{ background: "var(--card)", borderColor: "var(--stroke)", color: "var(--muted)" }}
           title="Өнгө солих"
           aria-label="Өнгө солих"
@@ -144,8 +144,8 @@ export default function TeacherFilesPage() {
         </button>
       </div>
 
-      {/* Inline nav (өмнөхтэй ижил таб) */}
-      <div className="header text-center pt-4">
+      {/* Top nav */}
+      <div className="pt-4 text-center">
         <div
           className="inline-flex gap-2 p-2 rounded-xl"
           style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
@@ -165,24 +165,27 @@ export default function TeacherFilesPage() {
         </div>
       </div>
 
-      <div className="wrap max-w-[1000px] mx-auto px-4 my-8">
-        {/* Subject grid */}
-        <div
-          className="card rounded-2xl p-4 md:p-6"
-          style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
-        >
-          <label className="block mb-3 font-bold">Хичээлээ сонго</label>
-          <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+      {/* Sticky subject/search bar */}
+      <div
+        className="sticky top-0 z-40 mt-3 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--card)/0.7] bg-[var(--card)] border-b"
+        style={{ borderColor: "var(--stroke)" }}
+      >
+        <div className="max-w-[1000px] mx-auto">
+          <label className="block mb-2 font-bold text-sm sm:text-base">Хичээлээ сонго</label>
+
+          {/* Responsive subject grid */}
+          <div className="grid gap-2 sm:gap-3 mb-3 sm:mb-4 grid-cols-3 xs:grid-cols-4 md:grid-cols-5">
             {SUBJECTS.map((s) => {
               const selected = subject === s;
               return (
                 <button
                   key={s}
                   onClick={() => fetchFiles(s)}
-                  className="subject-card rounded-xl p-3 text-center font-semibold"
+                  className="rounded-lg px-3 py-2 text-center text-xs sm:text-sm font-semibold truncate"
                   style={{
                     border: `1px solid ${selected ? "#9fbfff" : "var(--stroke)"}`,
-                    background: selected ? "rgba(139,184,255,.15)" : "transparent",
+                    background: selected ? "rgba(139,184,255,.15)" : "var(--card2)",
+                    color: selected ? "var(--text)" : "var(--text)",
                     transition: "background-color .2s, border-color .2s",
                   }}
                 >
@@ -197,28 +200,93 @@ export default function TeacherFilesPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Quiz нэр/имэйлээр хайх…"
-            className="w-full rounded-md px-3 py-2"
+            className="w-full rounded-md px-3 py-2 text-sm sm:text-base"
             style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
           />
         </div>
+      </div>
 
-        {/* List */}
-        <div className="file-list-container mt-6">
-          {loading ? (
-            <div className="text-center p-6">Уншиж байна…</div>
-          ) : err ? (
-            <div className="text-center p-6" style={{ color: "#ff8b8b" }}>
-              {err}
+      <div className="max-w-[1000px] mx-auto px-4 py-5">
+        {/* States */}
+        {loading && (
+          <div className="space-y-2">
+            {/* simple skeletons */}
+            {[...Array(5)].map((_, i) => (
+              <div
+                key={i}
+                className="h-14 rounded-xl animate-pulse"
+                style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
+              />
+            ))}
+          </div>
+        )}
+
+        {!loading && err && (
+          <div className="text-center p-6" style={{ color: "#ff8b8b" }}>
+            {err}
+          </div>
+        )}
+
+        {!loading && !err && subject && filtered.length === 0 && (
+          <div className="text-center p-6" style={{ color: "var(--muted)" }}>
+            “{subject}” хичээлд бичлэг алга.
+          </div>
+        )}
+
+        {/* Mobile cards */}
+        {!loading && !err && filtered.length > 0 && (
+          <>
+            <div className="md:hidden space-y-3">
+              {filtered.map((f) => {
+                const canDelete = user?.email && f.uploadedByEmail && user.email === f.uploadedByEmail;
+                return (
+                  <div
+                    key={f.id}
+                    className="rounded-2xl p-3"
+                    style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">{f.quizName}</div>
+                        <div className="text-xs text-[var(--muted)] mt-0.5">
+                          {f.subject} · {f.uploadedByEmail ?? "—"}
+                        </div>
+                        <div className="text-xs text-[var(--muted)] mt-0.5">
+                          {f.uploadedAt ? new Date(f.uploadedAt).toLocaleString() : "—"}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        {canDelete ? (
+                          <button
+                            className="px-3 py-1.5 rounded-lg text-xs"
+                            style={{ background: "#ff4d4d2b", color: "#ff8b8b", border: "1px solid #ff4d4d88" }}
+                            onClick={() =>
+                              openConfirm(
+                                "Архивлах уу?",
+                                `“${f.quizName}” бичлэгийг архивлахаар устгана. Үүнтэй холбоотой бүх дүн (students/*/results/${f.quizId}) мөн устгагдана.`,
+                                () => deleteQuiz(f)
+                              )
+                            }
+                          >
+                            Архивлах
+                          </button>
+                        ) : (
+                          <span className="text-[11px]" style={{ color: "var(--muted)" }}>
+                            Зөвхөн эзэмшигч
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ) : subject && filtered.length === 0 ? (
-            <div className="text-center p-6" style={{ color: "var(--muted)" }}>
-              “{subject}” хичээлд бичлэг алга.
-            </div>
-          ) : filtered.length > 0 ? (
-            <div className="overflow-auto border border-stroke rounded-lg">
+
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-auto border border-[var(--stroke)] rounded-xl">
               <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="bg-card2 border-b border-stroke">
+                  <tr className="border-b" style={{ background: "var(--card2)", borderColor: "var(--stroke)" }}>
                     <th className="px-3 py-2 text-left">Шалгалтын нэр</th>
                     <th className="px-3 py-2 text-left">Хичээл</th>
                     <th className="px-3 py-2 text-left">Оруулсан</th>
@@ -230,13 +298,11 @@ export default function TeacherFilesPage() {
                   {filtered.map((f) => {
                     const canDelete = user?.email && f.uploadedByEmail && user.email === f.uploadedByEmail;
                     return (
-                      <tr key={f.id} className="border-b border-stroke">
+                      <tr key={f.id} className="border-b" style={{ borderColor: "var(--stroke)" }}>
                         <td className="px-3 py-2 font-semibold">{f.quizName}</td>
                         <td className="px-3 py-2">{f.subject}</td>
                         <td className="px-3 py-2">{f.uploadedByEmail ?? "—"}</td>
-                        <td className="px-3 py-2">
-                          {f.uploadedAt ? new Date(f.uploadedAt).toLocaleString() : "—"}
-                        </td>
+                        <td className="px-3 py-2">{f.uploadedAt ? new Date(f.uploadedAt).toLocaleString() : "—"}</td>
                         <td className="px-3 py-2 text-right">
                           {canDelete ? (
                             <button
@@ -264,8 +330,8 @@ export default function TeacherFilesPage() {
                 </tbody>
               </table>
             </div>
-          ) : null}
-        </div>
+          </>
+        )}
       </div>
 
       {/* Modal */}
@@ -276,7 +342,7 @@ export default function TeacherFilesPage() {
           onClick={(e) => e.currentTarget === e.target && closeModal()}
         >
           <div
-            className="rounded-2xl p-6 w-[90%] max-w-[420px] text-center"
+            className="rounded-2xl p-6 w-[92%] max-w-[420px] text-center"
             style={{ background: "var(--bg)", border: "1px solid var(--stroke)" }}
           >
             <h3 className="m-0 text-lg font-bold mb-2">{modal.title}</h3>

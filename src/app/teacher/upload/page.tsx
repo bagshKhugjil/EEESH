@@ -36,7 +36,7 @@ type RawRow = {
 };
 
 type ParsedRow = {
-  externalId: string;            // normalized
+  externalId: string;
   className: string;
   firstName: string;
   lastName: string;
@@ -60,15 +60,15 @@ type UploadPayload = {
   uploadedAt: string; // ISO
   rows: MergedRow[];
   sourceFiles: {
-    part1?: string; // filename
-    part2?: string; // filename
+    part1?: string;
+    part2?: string;
   };
 };
 
 export default function TeacherUploadPage() {
   const { user } = useAuth();
 
-  // --- THEME / hydration-safe ---
+  // THEME
   const [mounted, setMounted] = useState(false);
   const [lightMode, setLightMode] = useState(false);
   useEffect(() => {
@@ -96,14 +96,14 @@ export default function TeacherUploadPage() {
     }
   };
 
-  // --- SUBJECT / FILES ---
+  // SUBJECT / FILES
   const [subject, setSubject] = useState<string>("");
   const [filePart1, setFilePart1] = useState<File | null>(null);
   const [filePart2, setFilePart2] = useState<File | null>(null);
   const fileInput1Ref = useRef<HTMLInputElement>(null);
   const fileInput2Ref = useRef<HTMLInputElement>(null);
 
-  // --- STATUS + MODAL ---
+  // STATUS + MODAL
   const [status, setStatus] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
@@ -118,7 +118,7 @@ export default function TeacherUploadPage() {
   };
   const closeModal = () => setModalOpen(false);
 
-  // --- HELPERS ---
+  // HELPERS
   const allowedExt = ["xlsx", "csv"];
   const acceptAttr =
     ".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv";
@@ -155,7 +155,7 @@ export default function TeacherUploadPage() {
     handleFileChoose(which, f);
   }, []);
 
-  // ==== Excel/CSV унших, парслэх ====
+  // ==== Excel/CSV ====
   async function readTable(file: File): Promise<ParsedRow[]> {
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
@@ -168,7 +168,6 @@ export default function TeacherUploadPage() {
       const fn = String(r["First Name"] ?? "").trim();
       const ln = String(r["Last Name"] ?? "").trim();
 
-      // тоо руу аюулгүй хөрвүүлэлт
       const nqRaw = r["Num Questions"];
       const ncRaw = r["Num Correct"];
       const pcRaw = r["Percent Correct"];
@@ -176,9 +175,7 @@ export default function TeacherUploadPage() {
       const nqNum = nqRaw === "" || nqRaw === undefined ? null : Number(nqRaw);
       const ncNum = ncRaw === "" || ncRaw === undefined ? null : Number(ncRaw);
       const pcNum =
-        pcRaw === "" || pcRaw === undefined
-          ? null
-          : Number(String(pcRaw).replace("%", ""));
+        pcRaw === "" || pcRaw === undefined ? null : Number(String(pcRaw).replace("%", ""));
 
       return {
         externalId: ext,
@@ -191,13 +188,11 @@ export default function TeacherUploadPage() {
       };
     });
 
-    // externalId хоосон мөрүүдийг авч хаяна
     return parsed.filter((r) => r.externalId !== "");
   }
 
   function mergeParts(p1?: ParsedRow[], p2?: ParsedRow[]): MergedRow[] {
     const map = new Map<string, MergedRow>();
-
     const attach = (rows: ParsedRow[], which: "part1" | "part2") => {
       rows.forEach((r) => {
         const key = r.externalId;
@@ -226,7 +221,6 @@ export default function TeacherUploadPage() {
   }
 
   function makeQuizName(subjectName: string, file1?: File | null, file2?: File | null): string {
-    // Файлын нэр + subject + yyyy-mm-dd HH:MM
     const date = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
     const ts = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
@@ -302,12 +296,12 @@ export default function TeacherUploadPage() {
     }
   };
 
-  // modal өнгө: mounted болмогц шалгана
+  // modal өнгө (warning өнгөний жижиг тэмдэгтийн алдаа зассан)
   const isLight = mounted && document.documentElement.classList.contains("light");
   const modalTitleColor =
     modalType === "success" ? (isLight ? "#10b981" : "#9af5e3")
     : modalType === "error" ? (isLight ? "#ef4444" : "#ff8b8b")
-    : modalType === "warning" ? (isLight ? "#f59e0b" : "#ffc97а")
+    : modalType === "warning" ? (isLight ? "#f59e0b" : "#ffc97a")
     : "var(--text)";
 
   return (
@@ -321,61 +315,47 @@ export default function TeacherUploadPage() {
           title="Өнгө солих"
           aria-label="Өнгө солих"
         >
-          {!mounted ? null : lightMode ? (
-            <svg className="m-auto" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-          ) : (
-            <svg className="m-auto" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="5"></circle>
-              <line x1="12" y1="1" x2="12" y2="3"></line>
-              <line x1="12" y1="21" x2="12" y2="23"></line>
-              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-              <line x1="1" y1="12" x2="3" y2="12"></line>
-              <line x1="21" y1="12" x2="23" y2="12"></line>
-              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-            </svg>
-          )}
+          {!mounted ? null : lightMode ? "☀️" : "🌙"}
         </button>
       </div>
 
       {/* Inline nav */}
-      <div className="header text-center pt-4">
+      <div className="header text-center pt-4 px-4 sm:px-0">
         <div
-          className="inline-flex gap-2 p-2 rounded-xl"
+          className="inline-flex flex-wrap gap-2 p-2 rounded-xl"
           style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
         >
-          <Link href="/teacher" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
+          <Link href="/teacher" className="px-3 sm:px-4 py-2 rounded-md font-bold" style={{ color: "var(--muted)" }}>
             Нүүр
           </Link>
-          <Link href="/teacher/upload" className="px-4 py-2 rounded-md font-bold" style={{ background: "var(--card2)", color: "var(--text)" }}>
+          <Link href="/teacher/upload" className="px-3 sm:px-4 py-2 rounded-md font-bold" style={{ background: "var(--card2)", color: "var(--text)" }}>
             Дүн оруулах
           </Link>
-          <Link href="/teacher/results" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
+          <Link href="/teacher/results" className="px-3 sm:px-4 py-2 rounded-md font-bold" style={{ color: "var(--muted)" }}>
             Дүн харах
           </Link>
-          <Link href="/teacher/files" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
+          <Link href="/teacher/files" className="px-3 sm:px-4 py-2 rounded-md font-bold" style={{ color: "var(--muted)" }}>
             Файл удирдлага
           </Link>
         </div>
       </div>
 
-      <div className="wrap max-w-[1000px] mx-auto px-4 my-8">
-        <div
-          className="card rounded-2xl p-4 md:p-6"
-          style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
-        >
-          <label className="block mb-3">Хичээлээ сонго</label>
-          <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+      <div className="wrap max-w-[1000px] mx-auto px-4 my-6 sm:my-8">
+        <div className="card rounded-2xl p-4 sm:p-6" style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}>
+          <label className="block mb-3 font-bold">Хичээлээ сонго</label>
+
+          {/* SUBJECT GRID: auto-fit responsive */}
+          <div
+            className="grid gap-2 sm:gap-3 mb-4"
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}
+          >
             {SUBJECTS.map((s) => {
               const selected = subject === s;
               return (
                 <button
                   key={s}
                   onClick={() => setSubject(s)}
-                  className="subject-card rounded-xl p-3 text-center font-semibold"
+                  className="rounded-xl py-2 px-3 text-center font-semibold"
                   style={{
                     border: `1px solid ${selected ? "#9fbfff" : "var(--stroke)"}`,
                     background: selected ? "rgba(139,184,255,.15)" : "transparent",
@@ -389,12 +369,12 @@ export default function TeacherUploadPage() {
           </div>
 
           {/* Upload areas */}
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 sm:gap-5 sm:grid-cols-2">
             {/* Part 1 */}
             <div
-              className="dropzone rounded-2xl p-5 text-center cursor-pointer min-h-[160px] grid place-items-center border-2 border-dashed"
+              className="rounded-2xl p-4 sm:p-5 text-center cursor-pointer min-h-[150px] grid place-items-center border-2 border-dashed"
               style={{
-                borderColor: filePart1 ? "#9af5e3" : "#9fbfff33",
+                borderColor: filePart1 ? "#9af5e3" : "var(--stroke)",
                 background: filePart1 ? "rgba(154, 245, 227, .08)" : "transparent",
               }}
               onClick={() => pickFile("part1")}
@@ -407,7 +387,7 @@ export default function TeacherUploadPage() {
                   Excel/CSV — чирж оруулах эсвэл дарж сонгох
                 </div>
                 {filePart1 && (
-                  <div className="mt-3 text-sm">
+                  <div className="mt-3 text-sm break-words">
                     <b>Сонгогдсон:</b> {filePart1.name}
                   </div>
                 )}
@@ -423,9 +403,9 @@ export default function TeacherUploadPage() {
 
             {/* Part 2 */}
             <div
-              className="dropzone rounded-2xl p-5 text-center cursor-pointer min-h-[160px] grid place-items-center border-2 border-dashed"
+              className="rounded-2xl p-4 sm:p-5 text-center cursor-pointer min-h-[150px] grid place-items-center border-2 border-dashed"
               style={{
-                borderColor: filePart2 ? "#9af5e3" : "#9fbfff33",
+                borderColor: filePart2 ? "#9af5e3" : "var(--stroke)",
                 background: filePart2 ? "rgba(154, 245, 227, .08)" : "transparent",
               }}
               onClick={() => pickFile("part2")}
@@ -438,7 +418,7 @@ export default function TeacherUploadPage() {
                   Excel/CSV — чирж оруулах эсвэл дарж сонгох
                 </div>
                 {filePart2 && (
-                  <div className="mt-3 text-sm">
+                  <div className="mt-3 text-sm break-words">
                     <b>Сонгогдсон:</b> {filePart2.name}
                   </div>
                 )}
@@ -459,9 +439,10 @@ export default function TeacherUploadPage() {
             </div>
           )}
 
-          <div className="footer mt-4 flex items-center justify-end gap-3">
+          {/* Footer actions (wrap on mobile) */}
+          <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
             <a
-              className="btn sample rounded-xl font-bold px-4 py-2"
+              className="rounded-xl font-bold px-4 py-2 text-center"
               href="https://docs.google.com/spreadsheets/d/19jHswtR9uxTRexVvCxPIPEzuQSSjs-9O7_32IXGEF4g/export?format=xlsx"
               target="_blank"
               rel="noopener"
@@ -471,13 +452,13 @@ export default function TeacherUploadPage() {
             </a>
             <Link
               href="/teacher"
-              className="btn rounded-xl font-bold px-4 py-2"
+              className="rounded-xl font-bold px-4 py-2 text-center"
               style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
             >
               Буцах
             </Link>
             <button
-              className="btn primary rounded-xl font-bold px-4 py-2"
+              className="rounded-xl font-bold px-4 py-2 text-center"
               style={{ background: "var(--primary-bg)", color: "var(--primary-text)", border: "1px solid transparent" }}
               onClick={doUpload}
             >
@@ -497,7 +478,7 @@ export default function TeacherUploadPage() {
           }}
         >
           <div
-            className="rounded-2xl p-6 w-[90%] max-w-[420px] text-center animate-[fadeIn_.3s_ease]"
+            className="rounded-2xl p-6 w-[92%] max-w-[420px] text-center"
             style={{ background: "var(--bg)", border: "1px solid var(--stroke)" }}
           >
             <div className="flex items-center justify-center gap-2 mb-3">
@@ -508,11 +489,11 @@ export default function TeacherUploadPage() {
                 {modalTitle}
               </h3>
             </div>
-            <p className="mb-6" style={{ color: "var(--muted)", lineHeight: 1.5 }}>
+            <p className="mb-5 sm:mb-6" style={{ color: "var(--muted)", lineHeight: 1.5 }}>
               {modalMessage}
             </p>
             <button
-              className="btn rounded-xl font-bold px-4 py-2 w-full"
+              className="rounded-xl font-bold px-4 py-2 w-full"
               style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
               onClick={closeModal}
             >
