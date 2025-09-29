@@ -1,3 +1,4 @@
+//api/teacher/quizzes/[id]
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/adminApp";
 import { DecodedIdToken } from "firebase-admin/auth";
