@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
 
     // ---- Query params ----
-    const pageSizeParam = Number(searchParams.get("pageSize") ?? 50);
+    const pageSizeParam = Number(searchParams.get("pageSize") ?? 100);
     const pageSize = Number.isFinite(pageSizeParam)
       ? Math.min(Math.max(pageSizeParam, 1), 200)
       : 50;

@@ -184,6 +184,10 @@ function UsersManagement() {
   const [modalState, setModalState] = useState<ModalState>({ isOpen: false, userToUpdate: null, newRole: null });
   const [isChangingRole, setIsChangingRole] = useState<boolean>(false);
 
+  // 🔎 Хайх + шүүлтүүр
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "teacher" | "student" | "parent" | "unknown">("all");
+
   const showToast = (message: string, type: "success" | "error"): void => {
     setToast({ show: true, message, type });
     window.setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
@@ -249,8 +253,24 @@ function UsersManagement() {
     }
   };
 
-  const ROLES = ["student", "parent", "teacher", "admin"];
+  const ROLES = ["student", "parent", "teacher", "admin"] as const;
   const safeUsers: UserRecord[] = Array.isArray(users) ? users : [];
+
+  // 🔎 Хайлт + роль шүүлтүүртэй жагсаалт
+  const filteredUsers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return safeUsers.filter((u) => {
+      // роль шүүлтүүр
+      const r = (u.role ?? "unknown") as string;
+      const roleOk = roleFilter === "all" ? true : r === roleFilter;
+
+      // хайлт: нэр/имэйл дээр
+      const hay = `${u.displayName ?? ""} ${u.email ?? ""}`.toLowerCase();
+      const searchOk = q ? hay.includes(q) : true;
+
+      return roleOk && searchOk;
+    });
+  }, [safeUsers, query, roleFilter]);
 
   return (
     <>
@@ -264,6 +284,32 @@ function UsersManagement() {
         </div>
       </div>
 
+      {/* 🔎 Хайх & Шүүх мөр */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Нэр/имэйлээр хайх…"
+          className="w-full sm:max-w-sm rounded-md px-3 py-2 text-sm"
+          style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+          aria-label="Нэр эсвэл имэйлээр хайх"
+        />
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value as any)}
+          className="w-full sm:w-48 rounded-md px-3 py-2 text-sm"
+          style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+          aria-label="Роль шүүх"
+        >
+          <option value="all">Бүгд</option>
+          <option value="admin">Admin</option>
+          <option value="teacher">Teacher</option>
+          <option value="student">Student</option>
+          <option value="parent">Parent</option>
+          <option value="unknown">Тодорхойгүй</option>
+        </select>
+      </div>
+
       <div className="min-w-full">
         {loading ? (
           <SkeletonLoader />
@@ -273,10 +319,10 @@ function UsersManagement() {
             <p className="font-bold">Алдаа гарлаа</p>
             <p className="text-sm">{error}</p>
           </div>
-        ) : safeUsers.length === 0 ? (
+        ) : filteredUsers.length === 0 ? (
           <div className="text-center py-8 text-muted">Хэрэглэгч олдсонгүй.</div>
         ) : (
-          safeUsers.map((u) => (
+          filteredUsers.map((u) => (
             <div key={u.uid} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border-b border-stroke last:border-0">
               <div className="flex items-center gap-4">
                 <Image
@@ -563,7 +609,9 @@ function StudentImportWithMapping() {
   );
 }
 
-/* ==================== 3) Students List + Delete ==================== */
+/* ==================== 3) Students List + Delete (sortable columns) ==================== */
+
+/* ==================== 3) Students List + Delete (sortable + pagination) ==================== */
 
 function StudentListManager() {
   const { user } = useAuth();
@@ -573,7 +621,25 @@ function StudentListManager() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
-  const isAllSelected = useMemo(() => students.length > 0 && selected.size === students.length, [selected, students.length]);
+  // ✅ sort state
+  type SortKey =
+    | "lastName"
+    | "firstName"
+    | "email"
+    | "class"
+    | "grade"
+    | "parentEmail1"
+    | "parentEmail2"
+    | "externalId"
+    | "id";
+  type SortDir = "asc" | "desc" | null;
+
+  const [sortKey, setSortKey] = useState<SortKey>("lastName");
+  const [sortDir, setSortDir] = useState<SortDir>(null);
+
+  // ✅ pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
 
   const fetchStudents = useCallback(async (): Promise<void> => {
     if (!user) return;
@@ -581,11 +647,14 @@ function StudentListManager() {
     setErr(null);
     try {
       const token = await user.getIdToken();
-      const res = await fetch("/api/admin/students", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/students", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = (await res.json()) as { students?: Student[]; error?: string };
       if (!res.ok) throw new Error(data.error || "Жагсаалт татаж чадсангүй.");
       setStudents(Array.isArray(data.students) ? data.students : []);
       setSelected(new Set());
+      setPage(1); // шинэчилсний дараа 1-р хуудаснаас
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
     } finally {
@@ -597,6 +666,56 @@ function StudentListManager() {
     void fetchStudents();
   }, [fetchStudents]);
 
+  // ✅ sorting helpers
+  const norm = (v: unknown) => (v ?? "").toString().toLowerCase();
+
+  const sortedStudents = useMemo(() => {
+    if (!sortDir) return students; // no sort
+    const arr = [...students];
+    arr.sort((a, b) => {
+      const av =
+        sortKey === "externalId"
+          ? (a.externalId || a.id)
+          : (a[sortKey as keyof Student] as string | undefined);
+      const bv =
+        sortKey === "externalId"
+          ? (b.externalId || b.id)
+          : (b[sortKey as keyof Student] as string | undefined);
+
+      const A = norm(av);
+      const B = norm(bv);
+      if (A < B) return sortDir === "asc" ? -1 : 1;
+      if (A > B) return sortDir === "asc" ? 1 : -1;
+
+      // stable fallback by id
+      const idA = norm(a.id);
+      const idB = norm(b.id);
+      if (idA < idB) return -1;
+      if (idA > idB) return 1;
+      return 0;
+    });
+    return arr;
+  }, [students, sortKey, sortDir]);
+
+  // ✅ pagination slices
+  const total = sortedStudents.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.max(1, Math.min(page, totalPages));
+  const startIdx = (currentPage - 1) * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, total);
+  const visible = sortedStudents.slice(startIdx, endIdx);
+
+  // sort / pageSize солигдоход 1-р хуудас руу буцаана
+  useEffect(() => {
+    setPage(1);
+  }, [sortKey, sortDir, pageSize]);
+
+  // ✅ selection (хуудсан дахь мөрүүд)
+  const isAllSelected = useMemo(
+    () => visible.length > 0 && visible.every((s) => selected.has(s.id)),
+    [visible, selected]
+  );
+
   const toggleOne = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -606,9 +725,18 @@ function StudentListManager() {
     });
   };
 
-  const toggleAll = () => {
-    if (isAllSelected) setSelected(new Set());
-    else setSelected(new Set(students.map((s) => s.id)));
+  const toggleAllVisible = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (isAllSelected) {
+        // одоогийн хуудсан дахь бүх мөрийг сонголтоос авах
+        visible.forEach((s) => next.delete(s.id));
+      } else {
+        // одоогийн хуудсан дахь бүх мөрийг сонгох
+        visible.forEach((s) => next.add(s.id));
+      }
+      return next;
+    });
   };
 
   const deleteOne = async (id: string) => {
@@ -620,7 +748,10 @@ function StudentListManager() {
     try {
       setBusyIds((p) => new Set(p).add(id));
       const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/students/${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/students/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) throw new Error(data.error || "Устгал амжилтгүй.");
       setStudents((list) => list.filter((s) => s.id !== id));
@@ -661,6 +792,36 @@ function StudentListManager() {
     }
   };
 
+  const sortIcon = (key: SortKey) => {
+    if (sortKey !== key || !sortDir) return <span aria-hidden className="ml-1 opacity-50 select-none">↕</span>;
+    return <span aria-hidden className="ml-1 select-none">{sortDir === "asc" ? "↑" : "↓"}</span>;
+  };
+
+  const onSort = (key: SortKey) => {
+    setSortKey((prevKey) => {
+      if (prevKey !== key) {
+        setSortDir("asc");
+        return key;
+      }
+      setSortDir((prevDir) => (prevDir === "asc" ? "desc" : prevDir === "desc" ? null : "asc"));
+      return prevKey;
+    });
+  };
+
+  const sortableTh = (label: string, key: SortKey, extra?: string) => (
+    <th className={`px-3 py-2 text-left ${extra || ""}`}>
+      <button
+        type="button"
+        onClick={() => onSort(key)}
+        className="inline-flex items-center gap-1 font-semibold hover:underline decoration-dotted"
+        title="Эрэмбэлэх"
+      >
+        <span>{label}</span>
+        {sortIcon(key)}
+      </button>
+    </th>
+  );
+
   return (
     <div className="card border border-stroke bg-card p-6 rounded-2xl">
       <div className="flex items-center justify-between gap-3 mb-4">
@@ -670,11 +831,59 @@ function StudentListManager() {
           </div>
           <h2 className="text-lg font-bold">Сурагчдын жагсаалт</h2>
         </div>
+
+        {/* ✅ pagination controls (top-right) */}
         <div className="flex items-center gap-2">
-          <button onClick={() => void fetchStudents()} className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm font-bold">
+          <div className="hidden sm:flex items-center gap-2 mr-2 text-sm text-muted">
+            <span>
+              {total === 0 ? "0" : `${startIdx + 1}–${endIdx}`} / {total}
+            </span>
+          </div>
+
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="px-2 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm"
+            title="Хуудасны хэмжээ"
+          >
+            <option value={20}>20/хуудас</option>
+            <option value={50}>50/хуудас</option>
+            <option value={100}>100/хуудас</option>
+          </select>
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+              className="px-2 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm disabled:opacity-50"
+              title="Өмнөх"
+            >
+              ‹
+            </button>
+            <span className="px-2 text-sm">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages}
+              className="px-2 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm disabled:opacity-50"
+              title="Дараах"
+            >
+              ›
+            </button>
+          </div>
+
+          <button
+            onClick={() => void fetchStudents()}
+            className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm font-bold"
+          >
             Дахин ачаалах
           </button>
-          <button onClick={deleteSelected} disabled={selected.size === 0} className="px-3 py-2 rounded-lg bg-red-500/90 text-white text-sm font-bold disabled:opacity-50">
+          <button
+            onClick={deleteSelected}
+            disabled={selected.size === 0}
+            className="px-3 py-2 rounded-lg bg-red-500/90 text-white text-sm font-bold disabled:opacity-50"
+          >
             Сонгосныг устгах ({selected.size})
           </button>
         </div>
@@ -688,7 +897,7 @@ function StudentListManager() {
           <p className="font-bold">Алдаа</p>
           <p className="text-sm">{err}</p>
         </div>
-      ) : students.length === 0 ? (
+      ) : total === 0 ? (
         <div className="text-center py-10 text-muted">Сурагч алга.</div>
       ) : (
         <div className="overflow-auto border border-stroke rounded-lg">
@@ -696,21 +905,26 @@ function StudentListManager() {
             <thead>
               <tr className="bg-card2 border-b border-stroke">
                 <th className="px-3 py-2 w-12">
-                  <input type="checkbox" aria-label="Бүгдийг сонгох" checked={isAllSelected} onChange={toggleAll} />
+                  <input
+                    type="checkbox"
+                    aria-label="Одоогийн хуудсан дахь бүх мөрийг сонгох"
+                    checked={isAllSelected}
+                    onChange={toggleAllVisible}
+                  />
                 </th>
-                <th className="px-3 py-2 text-left">Овог</th>
-                <th className="px-3 py-2 text-left">Нэр</th>
-                <th className="px-3 py-2 text-left">И-мэйл</th>
-                <th className="px-3 py-2 text-left">Анги</th>
-                <th className="px-3 py-2 text-left">Зэрэглэл</th>
-                <th className="px-3 py-2 text-left">Эцэг/эхийн имэйл 1</th>
-                <th className="px-3 py-2 text-left">Эцэг/эхийн имэйл 2</th>
-                <th className="px-3 py-2 text-left">ID</th>
+                {sortableTh("Овог", "lastName")}
+                {sortableTh("Нэр", "firstName")}
+                {sortableTh("И-мэйл", "email")}
+                {sortableTh("Анги", "class")}
+                {sortableTh("Зэрэглэл", "grade")}
+                {sortableTh("Эцэг/эхийн имэйл 1", "parentEmail1")}
+                {sortableTh("Эцэг/эхийн имэйл 2", "parentEmail2")}
+                {sortableTh("ID", "externalId")}
                 <th className="px-3 py-2 text-left">Үйлдэл</th>
               </tr>
             </thead>
             <tbody>
-              {students.map((s) => {
+              {visible.map((s) => {
                 const nameLast = s.lastName || "";
                 const nameFirst = s.firstName || "";
                 const checked = selected.has(s.id);
@@ -718,7 +932,12 @@ function StudentListManager() {
                 return (
                   <tr key={s.id} className="border-b border-stroke">
                     <td className="px-3 py-2">
-                      <input type="checkbox" aria-label="Сонгох" checked={checked} onChange={() => toggleOne(s.id)} />
+                      <input
+                        type="checkbox"
+                        aria-label="Сонгох"
+                        checked={checked}
+                        onChange={() => toggleOne(s.id)}
+                      />
                     </td>
                     <td className="px-3 py-2">{nameLast}</td>
                     <td className="px-3 py-2">{nameFirst}</td>
@@ -743,6 +962,32 @@ function StudentListManager() {
               })}
             </tbody>
           </table>
+
+          {/* ✅ bottom pagination duplicate (optional) */}
+          <div className="flex items-center justify-between gap-2 p-3 text-sm">
+            <div className="text-muted">
+              Нийт: {total}. Харагдаж буй: {startIdx + 1}–{endIdx}.
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="px-2 py-1.5 rounded-lg border border-stroke bg-card2 text-text disabled:opacity-50"
+              >
+                Өмнөх
+              </button>
+              <span className="px-2">
+                {currentPage} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="px-2 py-1.5 rounded-lg border border-stroke bg-card2 text-text disabled:opacity-50"
+              >
+                Дараах
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -776,6 +1021,7 @@ function AdminDashboardTabs() {
         >
           Сурагчдын жагсаалт
         </button>
+        
       </div>
 
       {/* Tab Content */}
