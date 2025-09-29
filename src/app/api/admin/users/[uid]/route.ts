@@ -1,84 +1,96 @@
+// src/app/api/admin/users/[uid]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/adminApp";
 import { DecodedIdToken } from "firebase-admin/auth";
+import { FieldValue } from "firebase-admin/firestore";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 interface DecodedTokenWithRole extends DecodedIdToken {
   role?: string;
 }
 
-type Ctx = { params: Promise<{ uid: string }> };
 type AllowedRole = "teacher" | "student" | "parent" | "admin";
+type Ctx = { params: Promise<{ uid: string }> };
+
+function json(body: any, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
 
 export async function POST(req: NextRequest, { params }: Ctx) {
   try {
-    const { uid: targetUid } = await params;
-
-    // 1. Authorization header шалгах
-    const authorization = req.headers.get("Authorization");
-    if (!authorization?.startsWith("Bearer ")) {
-      console.error("❌ Missing Authorization header");
-      return NextResponse.json({ error: "Хандах эрхгүй" }, { status: 401 });
+    // ---- 1) Auth: зөвхөн admin ----
+    const authz = req.headers.get("Authorization");
+    if (!authz?.startsWith("Bearer ")) {
+      return json({ ok: false, error: "UNAUTHORIZED" }, 401);
     }
+    const idToken = authz.slice("Bearer ".length);
 
-    const token = authorization.slice("Bearer ".length);
     let decoded: DecodedTokenWithRole;
     try {
-      decoded = (await adminAuth.verifyIdToken(token)) as DecodedTokenWithRole;
-    } catch (e) {
-      console.error("❌ verifyIdToken failed:", e);
-      return NextResponse.json({ error: "Токен хүчингүй" }, { status: 401 });
+      decoded = (await adminAuth.verifyIdToken(idToken)) as DecodedTokenWithRole;
+    } catch {
+      return json({ ok: false, error: "INVALID_TOKEN" }, 401);
     }
-
     if (decoded.role !== "admin") {
-      console.error("❌ Forbidden. Caller role:", decoded.role);
-      return NextResponse.json({ error: "Админ эрх шаардлагатай." }, { status: 403 });
+      return json({ ok: false, error: "FORBIDDEN" }, 403);
     }
 
-    // 2. Body-с role авах
+    // ---- 2) Params ----
+    const { uid: targetUid } = await params;
+    if (!targetUid) {
+      return json({ ok: false, error: "MISSING_UID" }, 400);
+    }
+
+    // ---- 3) Body ----
     let body: unknown;
     try {
       body = await req.json();
-    } catch (e) {
-      console.error("❌ Invalid JSON body:", e);
-      return NextResponse.json({ error: "JSON буруу байна" }, { status: 400 });
+    } catch {
+      return json({ ok: false, error: "BAD_JSON" }, 400);
     }
 
     const role = (body as { role?: string })?.role as AllowedRole | undefined;
     const allowed: AllowedRole[] = ["teacher", "student", "parent", "admin"];
-    if (!targetUid || !role || !allowed.includes(role)) {
-      console.error("❌ Bad request. targetUid:", targetUid, "role:", role);
-      return NextResponse.json({ error: "Буруу хүсэлт (uid/role)" }, { status: 400 });
+    if (!role || !allowed.includes(role)) {
+      return json({ ok: false, error: "BAD_ROLE" }, 400);
     }
 
-    // 3. Custom claims шинэчлэх
+    // ---- 4) Custom claims солих ----
     try {
       await adminAuth.setCustomUserClaims(targetUid, { role });
+      // (Сонголттой) Шинэ claim-ийг клиентийн талд хурдан хэрэгжүүлэхийн тулд refresh token-уудыг
+      // хүчингүй болгож болно. Ингэвэл хэрэглэгч дахин нэвтрэх/ID token-ээ сэргээх хэрэгтэй болно.
+      // await adminAuth.revokeRefreshTokens(targetUid);
     } catch (e) {
-      console.error("❌ setCustomUserClaims failed:", e);
-      return NextResponse.json({ error: "Custom claims тохируулахад алдаа" }, { status: 500 });
+      console.error("setCustomUserClaims failed:", e);
+      return json({ ok: false, error: "SET_CLAIM_FAILED" }, 500);
     }
 
-    // 4. Firestore document update биш set (merge)
+    // ---- 5) Firestore users/{uid} update (merge) ----
     try {
       await adminDb.collection("users").doc(targetUid).set(
         {
           role,
-          updatedAt: new Date().toISOString(),
+          updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
     } catch (e) {
-      console.error("❌ Firestore set(merge) failed:", e);
-      return NextResponse.json({ error: "Firestore бичихэд алдаа" }, { status: 500 });
+      console.error("users set(merge) failed:", e);
+      return json({ ok: false, error: "FIRESTORE_WRITE_FAILED" }, 500);
     }
 
-    return NextResponse.json(
-      { message: `Хэрэглэгчийн роль '${role}' болгож амжилттай өөрчиллөө.` },
-      { status: 200 }
-    );
-  } catch (error: unknown) {
-    console.error("❌ Unexpected error:", error);
-    const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return json({
+      ok: true,
+      message: `Role updated to '${role}' for uid=${targetUid}`,
+    });
+  } catch (e) {
+    console.error("Unexpected error:", e);
+    return json({ ok: false, error: "SERVER_ERROR" }, 500);
   }
 }

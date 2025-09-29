@@ -7,14 +7,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { withRole } from "@/components/withRole";
 import { useAuth } from "@/components/auth-provider";
-import {
-  Users,
-  Loader2,
-  CheckCircle,
-  AlertCircle,
-  ShieldQuestion,
-  Upload,
-} from "lucide-react";
+import { Users, Loader2, CheckCircle, AlertCircle, ShieldQuestion, Upload } from "lucide-react";
 
 /* ============================= Shared Types ============================= */
 
@@ -71,8 +64,7 @@ type Student = {
 /* ============================== Small UI ============================== */
 
 const getRoleBadgeClasses = (role: string | null): string => {
-  const baseClasses =
-    "px-2.5 py-0.5 text-xs font-semibold rounded-full border";
+  const baseClasses = "px-2.5 py-0.5 text-xs font-semibold rounded-full border";
   switch (role) {
     case "admin":
       return `${baseClasses} bg-red-500/10 text-red-400 border-red-500/20`;
@@ -90,10 +82,7 @@ const getRoleBadgeClasses = (role: string | null): string => {
 const SkeletonLoader = () => (
   <>
     {[...Array(3)].map((_, i) => (
-      <div
-        key={i}
-        className="flex items-center justify-between p-4 border-b border-stroke animate-pulse"
-      >
+      <div key={i} className="flex items-center justify-between p-4 border-b border-stroke animate-pulse">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-card2" />
           <div className="space-y-2">
@@ -134,22 +123,12 @@ const ConfirmationModal = ({
         </div>
         <p className="text-sm text-muted mb-6">
           Та{" "}
-          <span className="font-bold text-text">
-            {modalState.userToUpdate.displayName ||
-              modalState.userToUpdate.email}
-          </span>{" "}
+          <span className="font-bold text-text">{modalState.userToUpdate.displayName || modalState.userToUpdate.email}</span>{" "}
           хэрэглэгчийн эрхийг
-          <span className="font-bold text-primary-bg">
-            {" "}
-            &quot;{modalState.newRole}&quot;
-          </span>{" "}
-          болгохдоо итгэлтэй байна уу?
+          <span className="font-bold text-primary-bg"> &quot;{modalState.newRole}&quot;</span> болгохдоо итгэлтэй байна уу?
         </p>
         <div className="flex justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="bg-card2 border-stroke text-text px-4 py-2 text-sm font-bold rounded-lg hover:bg-card2/80"
-          >
+          <button onClick={onCancel} className="bg-card2 border-stroke text-text px-4 py-2 text-sm font-bold rounded-lg hover:bg-card2/80">
             Цуцлах
           </button>
           <button
@@ -157,9 +136,7 @@ const ConfirmationModal = ({
             disabled={isChangingRole}
             className="bg-primary-bg text-primary-text px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50 flex items-center"
           >
-            {isChangingRole ? (
-              <Loader2 className="animate-spin mr-2 h-4 w-4" />
-            ) : null}
+            {isChangingRole ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : null}
             {isChangingRole ? "Өөрчилж байна..." : "Тийм, өөрчлөх"}
           </button>
         </div>
@@ -182,11 +159,7 @@ function MappingSelect({
   return (
     <label className="block mb-3">
       <span className="block mb-1 text-sm text-muted">{label}</span>
-      <select
-        className="w-full bg-card2 border border-stroke rounded-md px-3 py-2"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
+      <select className="w-full bg-card2 border border-stroke rounded-md px-3 py-2" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">-- Сонгох --</option>
         {options.map((o) => (
           <option key={o} value={o}>
@@ -206,25 +179,14 @@ function UsersManagement() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [toast, setToast] = useState<{
-    show: boolean;
-    message: string;
-    type: "success" | "error";
-  }>({ show: false, message: "", type: "success" });
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: "success" | "error" }>({ show: false, message: "", type: "success" });
 
-  const [modalState, setModalState] = useState<ModalState>({
-    isOpen: false,
-    userToUpdate: null,
-    newRole: null,
-  });
+  const [modalState, setModalState] = useState<ModalState>({ isOpen: false, userToUpdate: null, newRole: null });
   const [isChangingRole, setIsChangingRole] = useState<boolean>(false);
 
   const showToast = (message: string, type: "success" | "error"): void => {
     setToast({ show: true, message, type });
-    window.setTimeout(
-      () => setToast({ show: false, message: "", type: "success" }),
-      3000
-    );
+    window.setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3000);
   };
 
   const fetchUsers = useCallback(async (): Promise<void> => {
@@ -233,21 +195,22 @@ function UsersManagement() {
     setError(null);
     try {
       const token = await user.getIdToken();
-      const response = await fetch("/api/admin/users", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = (await response.json()) as UserRecord[] | { error?: string };
-      if (!response.ok) {
-        const errorData = data as { error?: string };
-        throw new Error(
-          errorData.error || "Хэрэглэгчдийн мэдээллийг татахад алдаа гарлаа."
-        );
+      const response = await fetch("/api/admin/users", { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+
+      // —— Аюулгүй задлалт: массив эсвэл { users: [...] } хэлбэртэйг дэмжинэ
+      let list: UserRecord[] = [];
+      if (Array.isArray(data)) {
+        list = data as UserRecord[];
+      } else if (data && Array.isArray(data.users)) {
+        list = data.users as UserRecord[];
+      } else if (data?.error) {
+        throw new Error(data.error || "Хэрэглэгчдийн мэдээллийг татахад алдаа гарлаа.");
       }
-      setUsers(data as UserRecord[]);
+      setUsers(list);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Тодорхойгүй алдаа гарлаа."
-      );
+      setError(err instanceof Error ? err.message : "Тодорхойгүй алдаа гарлаа.");
+      setUsers([]); // хамгаалалт
     } finally {
       setLoading(false);
     }
@@ -268,31 +231,18 @@ function UsersManagement() {
     setIsChangingRole(true);
     try {
       const token = await user.getIdToken();
-      const response = await fetch(
-        `/api/admin/users/${modalState.userToUpdate.uid}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ role: modalState.newRole }),
-        }
-      );
-      const result = (await response.json()) as {
-        message?: string;
-        error?: string;
-      };
-      if (!response.ok)
-        throw new Error(result.error || "Роль өөрчлөхөд алдаа гарлаа.");
+      const response = await fetch(`/api/admin/users/${modalState.userToUpdate.uid}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: modalState.newRole }),
+      });
+      const result = (await response.json()) as { message?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || "Роль өөрчлөхөд алдаа гарлаа.");
 
       showToast(result.message || "Амжилттай", "success");
       await fetchUsers();
     } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Тодорхойгүй алдаа гарлаа.",
-        "error"
-      );
+      showToast(err instanceof Error ? err.message : "Тодорхойгүй алдаа гарлаа.", "error");
     } finally {
       setIsChangingRole(false);
       setModalState({ isOpen: false, userToUpdate: null, newRole: null });
@@ -300,6 +250,7 @@ function UsersManagement() {
   };
 
   const ROLES = ["student", "parent", "teacher", "admin"];
+  const safeUsers: UserRecord[] = Array.isArray(users) ? users : [];
 
   return (
     <>
@@ -309,9 +260,7 @@ function UsersManagement() {
         </div>
         <div>
           <h1 className="text-xl font-bold">Хэрэглэгчийн удирдлага</h1>
-          <p className="text-sm text-muted">
-            Firebase Auth дахь хэрэглэгчдийн роль солих.
-          </p>
+          <p className="text-sm text-muted">Firebase Auth дахь хэрэглэгчдийн роль солих.</p>
         </div>
       </div>
 
@@ -324,20 +273,14 @@ function UsersManagement() {
             <p className="font-bold">Алдаа гарлаа</p>
             <p className="text-sm">{error}</p>
           </div>
+        ) : safeUsers.length === 0 ? (
+          <div className="text-center py-8 text-muted">Хэрэглэгч олдсонгүй.</div>
         ) : (
-          users.map((u) => (
-            <div
-              key={u.uid}
-              className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border-b border-stroke last:border-0"
-            >
+          safeUsers.map((u) => (
+            <div key={u.uid} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border-b border-stroke last:border-0">
               <div className="flex items-center gap-4">
                 <Image
-                  src={
-                    u.photoURL ||
-                    `https://ui-avatars.com/api/?name=${
-                      u.displayName || u.email
-                    }&background=random`
-                  }
+                  src={u.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.displayName || u.email || "U")}&background=random`}
                   alt={u.displayName || "Хэрэглэгчийн зураг"}
                   width={40}
                   height={40}
@@ -345,14 +288,8 @@ function UsersManagement() {
                 />
                 <div>
                   <div className="flex items-center gap-2 mb-0.5">
-                    <p className="font-bold text-text">
-                      {u.displayName || "Нэргүй"}
-                    </p>
-                    <span className={getRoleBadgeClasses(u.role)}>
-                      {u.role
-                        ? u.role.charAt(0).toUpperCase() + u.role.slice(1)
-                        : "Тодорхойгүй"}
-                    </span>
+                    <p className="font-bold text-text">{u.displayName || "Нэргүй"}</p>
+                    <span className={getRoleBadgeClasses(u.role)}>{u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1) : "Тодорхойгүй"}</span>
                   </div>
                   <p className="text-xs text-muted">{u.email}</p>
                 </div>
@@ -384,27 +321,18 @@ function UsersManagement() {
 
       <ConfirmationModal
         modalState={modalState}
-        onCancel={() =>
-          setModalState({ isOpen: false, userToUpdate: null, newRole: null })
-        }
+        onCancel={() => setModalState({ isOpen: false, userToUpdate: null, newRole: null })}
         onConfirm={executeRoleChange}
         isChangingRole={isChangingRole}
       />
 
       {toast.show && (
         <div
-          className={`fixed bottom-5 right-5 flex items-center gap-3 p-4 rounded-lg border text-sm font-bold animate-fade-in-up
-            ${
-              toast.type === "success"
-                ? "bg-green-500/10 border-green-500/20 text-green-400"
-                : "bg-red-500/10 border-red-500/20 text-red-400"
-            }`}
+          className={`fixed bottom-5 right-5 flex items-center gap-3 p-4 rounded-lg border text-sm font-bold animate-fade-in-up ${
+            toast.type === "success" ? "bg-green-500/10 border-green-500/20 text-green-400" : "bg-red-500/10 border-red-500/20 text-red-400"
+          }`}
         >
-          {toast.type === "success" ? (
-            <CheckCircle size={18} />
-          ) : (
-            <AlertCircle size={18} />
-          )}
+          {toast.type === "success" ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
           {toast.message}
         </div>
       )}
@@ -421,9 +349,7 @@ function StudentImportWithMapping() {
   const [file, setFile] = useState<File | null>(null);
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
-  const [results, setResults] = useState<{ email: string; status: string }[]>(
-    []
-  );
+  const [results, setResults] = useState<{ email: string; status: string }[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [mapping, setMapping] = useState<Record<FieldKey, string | "">>({
@@ -439,10 +365,7 @@ function StudentImportWithMapping() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewRows = useMemo(() => rawRows.slice(0, 12), [rawRows]);
-  const mappingValid = useMemo(
-    () => REQUIRED_FIELDS.every((k) => !!mapping[k]),
-    [mapping]
-  );
+  const mappingValid = useMemo(() => REQUIRED_FIELDS.every((k) => !!mapping[k]), [mapping]);
 
   const onPickFile = () => fileInputRef.current?.click();
 
@@ -457,9 +380,7 @@ function StudentImportWithMapping() {
     const buf = await f.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, {
-      defval: "",
-    });
+    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: "" });
 
     if (!rows.length) {
       alert("Хоосон файл байна.");
@@ -491,9 +412,7 @@ function StudentImportWithMapping() {
   const startImport = async () => {
     if (!user) return;
     if (!mappingValid) {
-      alert(
-        "Шаардлагатай талбаруудыг (First Name, Last Name, Email) map хийж дуусга."
-      );
+      alert("Шаардлагатай талбаруудыг (First Name, Last Name, Email) map хийж дуусга.");
       return;
     }
     setLoading(true);
@@ -505,16 +424,10 @@ function StudentImportWithMapping() {
 
       const res = await fetch("/api/admin/students/import-mapped", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ rows }),
       });
-      const data = (await res.json()) as {
-        results: { email: string; status: string }[];
-        error?: string;
-      };
+      const data = (await res.json()) as { results: { email: string; status: string }[]; error?: string };
       if (!res.ok) throw new Error(data.error || "Импортын алдаа");
       setResults(data.results);
       setStep(3);
@@ -532,33 +445,17 @@ function StudentImportWithMapping() {
         <div className="bg-blue-500/10 p-2 rounded-lg border border-blue-500/20">
           <Upload className="w-6 h-6 text-blue-400" />
         </div>
-        <h2 className="text-lg font-bold">
-          Сурагч импорт (CSV/Excel + багана mapping)
-        </h2>
+        <h2 className="text-lg font-bold">Сурагч импорт (CSV/Excel + багана mapping)</h2>
       </div>
 
       {step === 1 && (
         <div className="space-y-3">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.csv"
-            hidden
-            onChange={(e) => onFileChosen(e.target.files?.[0] || null)}
-          />
-          <button
-            onClick={onPickFile}
-            className="px-4 py-2 bg-primary-bg text-primary-text rounded-lg font-bold"
-          >
+          <input ref={fileInputRef} type="file" accept=".xlsx,.csv" hidden onChange={(e) => onFileChosen(e.target.files?.[0] || null)} />
+          <button onClick={onPickFile} className="px-4 py-2 bg-primary-bg text-primary-text rounded-lg font-bold">
             Файл сонгох
           </button>
-          {file && (
-            <div className="text-sm text-muted">Сонгосон: {file.name}</div>
-          )}
-          <div className="text-xs text-muted">
-            Жишээ CSV толгой: First Name, Last Name, Email, Grade, Class,
-            ParentEmail1, ParentEmail2, External ID
-          </div>
+          {file && <div className="text-sm text-muted">Сонгосон: {file.name}</div>}
+          <div className="text-xs text-muted">Жишээ CSV толгой: First Name, Last Name, Email, Grade, Class, ParentEmail1, ParentEmail2, External ID</div>
         </div>
       )}
 
@@ -566,54 +463,14 @@ function StudentImportWithMapping() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div>
             <h3 className="font-bold mb-3">Багана → Талбар харгалзуулах</h3>
-            <MappingSelect
-              label="First Name *"
-              value={mapping.firstName}
-              onChange={(v) => onSelectMap("firstName", v)}
-              options={headers}
-            />
-            <MappingSelect
-              label="Last Name *"
-              value={mapping.lastName}
-              onChange={(v) => onSelectMap("lastName", v)}
-              options={headers}
-            />
-            <MappingSelect
-              label="Email *"
-              value={mapping.email}
-              onChange={(v) => onSelectMap("email", v)}
-              options={headers}
-            />
-            <MappingSelect
-              label="Grade"
-              value={mapping.grade}
-              onChange={(v) => onSelectMap("grade", v)}
-              options={headers}
-            />
-            <MappingSelect
-              label="Class"
-              value={mapping.class}
-              onChange={(v) => onSelectMap("class", v)}
-              options={headers}
-            />
-            <MappingSelect
-              label="Parent Email 1"
-              value={mapping.parentEmail1}
-              onChange={(v) => onSelectMap("parentEmail1", v)}
-              options={headers}
-            />
-            <MappingSelect
-              label="Parent Email 2"
-              value={mapping.parentEmail2}
-              onChange={(v) => onSelectMap("parentEmail2", v)}
-              options={headers}
-            />
-            <MappingSelect
-              label="External/Student ID"
-              value={mapping.externalId}
-              onChange={(v) => onSelectMap("externalId", v)}
-              options={headers}
-            />
+            <MappingSelect label="First Name *" value={mapping.firstName} onChange={(v) => onSelectMap("firstName", v)} options={headers} />
+            <MappingSelect label="Last Name *" value={mapping.lastName} onChange={(v) => onSelectMap("lastName", v)} options={headers} />
+            <MappingSelect label="Email *" value={mapping.email} onChange={(v) => onSelectMap("email", v)} options={headers} />
+            <MappingSelect label="Grade" value={mapping.grade} onChange={(v) => onSelectMap("grade", v)} options={headers} />
+            <MappingSelect label="Class" value={mapping.class} onChange={(v) => onSelectMap("class", v)} options={headers} />
+            <MappingSelect label="Parent Email 1" value={mapping.parentEmail1} onChange={(v) => onSelectMap("parentEmail1", v)} options={headers} />
+            <MappingSelect label="Parent Email 2" value={mapping.parentEmail2} onChange={(v) => onSelectMap("parentEmail2", v)} options={headers} />
+            <MappingSelect label="External/Student ID" value={mapping.externalId} onChange={(v) => onSelectMap("externalId", v)} options={headers} />
 
             <div className="mt-4 flex gap-2">
               <button
@@ -627,19 +484,11 @@ function StudentImportWithMapping() {
               >
                 Буцах
               </button>
-              <button
-                className="px-4 py-2 rounded-lg bg-primary-bg text-primary-text font-bold disabled:opacity-50"
-                onClick={startImport}
-                disabled={!mappingValid || loading}
-              >
+              <button className="px-4 py-2 rounded-lg bg-primary-bg text-primary-text font-bold disabled:opacity-50" onClick={startImport} disabled={!mappingValid || loading}>
                 {loading ? "Импортлож байна…" : "Импортлох"}
               </button>
             </div>
-            {!mappingValid && (
-              <p className="text-xs text-muted mt-2">
-                * тэмдэгтэй талбарууд заавал сонгогдсон байх ёстой.
-              </p>
-            )}
+            {!mappingValid && <p className="text-xs text-muted mt-2">* тэмдэгтэй талбарууд заавал сонгогдсон байх ёстой.</p>}
           </div>
 
           <div className="overflow-auto border border-stroke rounded-lg">
@@ -647,10 +496,7 @@ function StudentImportWithMapping() {
               <thead>
                 <tr className="bg-card2">
                   {headers.map((h) => (
-                    <th
-                      key={h}
-                      className="px-3 py-2 text-left border-b border-stroke"
-                    >
+                    <th key={h} className="px-3 py-2 text-left border-b border-stroke">
                       {h}
                     </th>
                   ))}
@@ -727,9 +573,7 @@ function StudentListManager() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
-  const isAllSelected = useMemo(() => {
-    return students.length > 0 && selected.size === students.length;
-  }, [selected, students.length]);
+  const isAllSelected = useMemo(() => students.length > 0 && selected.size === students.length, [selected, students.length]);
 
   const fetchStudents = useCallback(async (): Promise<void> => {
     if (!user) return;
@@ -737,9 +581,7 @@ function StudentListManager() {
     setErr(null);
     try {
       const token = await user.getIdToken();
-      const res = await fetch("/api/admin/students", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch("/api/admin/students", { headers: { Authorization: `Bearer ${token}` } });
       const data = (await res.json()) as { students?: Student[]; error?: string };
       if (!res.ok) throw new Error(data.error || "Жагсаалт татаж чадсангүй.");
       setStudents(Array.isArray(data.students) ? data.students : []);
@@ -765,11 +607,8 @@ function StudentListManager() {
   };
 
   const toggleAll = () => {
-    if (isAllSelected) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(students.map((s) => s.id)));
-    }
+    if (isAllSelected) setSelected(new Set());
+    else setSelected(new Set(students.map((s) => s.id)));
   };
 
   const deleteOne = async (id: string) => {
@@ -781,10 +620,7 @@ function StudentListManager() {
     try {
       setBusyIds((p) => new Set(p).add(id));
       const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/students/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`/api/admin/students/${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) throw new Error(data.error || "Устгал амжилтгүй.");
       setStudents((list) => list.filter((s) => s.id !== id));
@@ -813,10 +649,7 @@ function StudentListManager() {
       const ids = Array.from(selected);
       const res = await fetch("/api/admin/students/bulk-delete", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
       });
       const data = (await res.json()) as { deleted?: number; error?: string };
@@ -838,17 +671,10 @@ function StudentListManager() {
           <h2 className="text-lg font-bold">Сурагчдын жагсаалт</h2>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => void fetchStudents()}
-            className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm font-bold"
-          >
+          <button onClick={() => void fetchStudents()} className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm font-bold">
             Дахин ачаалах
           </button>
-          <button
-            onClick={deleteSelected}
-            disabled={selected.size === 0}
-            className="px-3 py-2 rounded-lg bg-red-500/90 text-white text-sm font-bold disabled:opacity-50"
-          >
+          <button onClick={deleteSelected} disabled={selected.size === 0} className="px-3 py-2 rounded-lg bg-red-500/90 text-white text-sm font-bold disabled:opacity-50">
             Сонгосныг устгах ({selected.size})
           </button>
         </div>
@@ -870,12 +696,7 @@ function StudentListManager() {
             <thead>
               <tr className="bg-card2 border-b border-stroke">
                 <th className="px-3 py-2 w-12">
-                  <input
-                    type="checkbox"
-                    aria-label="Бүгдийг сонгох"
-                    checked={isAllSelected}
-                    onChange={toggleAll}
-                  />
+                  <input type="checkbox" aria-label="Бүгдийг сонгох" checked={isAllSelected} onChange={toggleAll} />
                 </th>
                 <th className="px-3 py-2 text-left">Овог</th>
                 <th className="px-3 py-2 text-left">Нэр</th>
@@ -897,12 +718,7 @@ function StudentListManager() {
                 return (
                   <tr key={s.id} className="border-b border-stroke">
                     <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        aria-label="Сонгох"
-                        checked={checked}
-                        onChange={() => toggleOne(s.id)}
-                      />
+                      <input type="checkbox" aria-label="Сонгох" checked={checked} onChange={() => toggleOne(s.id)} />
                     </td>
                     <td className="px-3 py-2">{nameLast}</td>
                     <td className="px-3 py-2">{nameFirst}</td>
@@ -936,9 +752,7 @@ function StudentListManager() {
 /* ======================== 4) Page with Tabs ======================== */
 
 function AdminDashboardTabs() {
-  const [activeTab, setActiveTab] = useState<"users" | "import" | "students">(
-    "users"
-  );
+  const [activeTab, setActiveTab] = useState<"users" | "import" | "students">("users");
 
   return (
     <div className="card border border-stroke bg-card p-6 rounded-2xl">
@@ -946,31 +760,19 @@ function AdminDashboardTabs() {
       <div className="flex gap-2 border-b border-stroke mb-6">
         <button
           onClick={() => setActiveTab("users")}
-          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${
-            activeTab === "users"
-              ? "bg-primary-bg text-primary-text"
-              : "bg-card2 text-muted hover:text-text"
-          }`}
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "users" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
         >
           Хэрэглэгчид
         </button>
         <button
           onClick={() => setActiveTab("import")}
-          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${
-            activeTab === "import"
-              ? "bg-primary-bg text-primary-text"
-              : "bg-card2 text-muted hover:text-text"
-          }`}
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "import" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
         >
           Сурагч импорт
         </button>
         <button
           onClick={() => setActiveTab("students")}
-          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${
-            activeTab === "students"
-              ? "bg-primary-bg text-primary-text"
-              : "bg-card2 text-muted hover:text-text"
-          }`}
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "students" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
         >
           Сурагчдын жагсаалт
         </button>
@@ -978,9 +780,7 @@ function AdminDashboardTabs() {
 
       {/* Tab Content */}
       {activeTab === "users" && <UsersManagement />}
-
       {activeTab === "import" && <StudentImportWithMapping />}
-
       {activeTab === "students" && <StudentListManager />}
     </div>
   );

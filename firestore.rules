@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function role() {
+      return request.auth.token.role;
+    }
+    function isAdmin() {
+      return isSignedIn() && role() == 'admin';
+    }
+    function isTeacher() {
+      return isSignedIn() && role() == 'teacher';
+    }
+    function isStudent() {
+      return isSignedIn() && role() == 'student';
+    }
+
+    // -----------------------------
+    // quizzes/{quizId}
+    // Багш/админ уншина. (Хэрэв хүсвэл write-ийг зөвхөн админ/owner болгож чангатгаж болно.)
+    // -----------------------------
+    match /quizzes/{quizId} {
+      allow read: if isAdmin() || isTeacher();
+
+      // Client-ээс create/update хийхгүй болбол false тавьж болно.
+      // Админ SDK (server) бол rules-оос үл хамаарна.
+      allow write: if isAdmin() || isTeacher();
+      // Жишээ owner-т шалгах бол:
+      // allow write: if isAdmin() || (isTeacher() && request.resource.data.uploadedBy == request.auth.uid);
+    }
+
+    // -----------------------------
+    // results_flat/{rid}
+    // Багш/админ бүхний дүн харна; сурагч өөрийнхөө studentId-той мөрүүдийг л харна.
+    // -----------------------------
+    match /results_flat/{rid} {
+      allow read: if isAdmin() || isTeacher() ||
+        (isStudent() && resource.data.studentId == request.auth.uid);
+
+      // Client-ээс бичүүлэхгүй (бүх upload/агрегац серверээс)
+      allow write: if false;
+    }
+
+    // -----------------------------
+    // students/{sid}
+    // Багш/админ бүх сурагчийг уншина; сурагч зөвхөн өөрийнхөө profile-г уншина.
+    // -----------------------------
+    match /students/{sid} {
+      allow read: if isAdmin() || isTeacher() || (isStudent() && sid == request.auth.uid);
+      // Засваруудыг зөвхөн админ
+      allow write: if isAdmin();
+    }
+
+    // -----------------------------
+    // users/{uid}
+    // Админ бүхнийг уншина/засна; хэрэглэгч өөрийн doc-оо уншина.
+    // -----------------------------
+    match /users/{uid} {
+      allow read: if isAdmin() || (isSignedIn() && uid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // -----------------------------
+    // meta/studentsList
+    // Roster-г зөвхөн админ/багш уншина (сурагч хэрэггүй)
+    // -----------------------------
+    match /meta/studentsList {
+      allow read: if isAdmin() || isTeacher();
+      allow write: if isAdmin(); // (Cloud Functions/Admin SDK бол rules-оос үл хамаарна)
+    }
+
+    // Бусад бүх зүйл default-оор хориглоно
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

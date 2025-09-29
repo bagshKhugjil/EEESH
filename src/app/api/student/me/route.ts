@@ -11,23 +11,54 @@ interface DecodedWithRole extends DecodedIdToken {
   role?: AllowedRole | string;
 }
 
-function mapStudentDoc(d: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>) {
-  const v = d.data() || {};
-  const firstName = (v.firstName ?? v.firstname ?? "") as string;
-  const lastName = (v.lastName ?? v.lastname ?? "") as string;
-  const fallbackName = [lastName, firstName].filter(Boolean).join(" ") || (v.name ?? "NoName");
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
+type StudentDocShape = {
+  firstName?: string;
+  firstname?: string;
+  lastName?: string;
+  lastname?: string;
+  name?: string;
+  class?: string;
+  grade?: string;
+  externalId?: string | number | null;
+  email?: string | null;
+  parentEmail1?: string | null;
+  parentEmail2?: string | null;
+  phone?: string | null;
+};
+
+function mapStudentDoc(
+  d: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>
+) {
+  const v = (d.data() || {}) as StudentDocShape;
+  const firstName = String(v.firstName ?? v.firstname ?? "").trim();
+  const lastName = String(v.lastName ?? v.lastname ?? "").trim();
+  const fallbackName =
+    [lastName, firstName].filter(Boolean).join(" ") ||
+    String(v.name ?? "NoName");
 
   return {
     id: d.id,
-    class: (v.class ?? v.grade ?? "N/A") as string,
-    externalId: (v.externalId ?? null) as string | null,
+    class: String(v.class ?? v.grade ?? "N/A"),
+    externalId:
+      v.externalId === null || v.externalId === undefined
+        ? null
+        : (typeof v.externalId === "number"
+            ? String(v.externalId)
+            : String(v.externalId)),
     firstName,
     lastName,
-    name: (v.name ?? fallbackName) as string,
-    email: (v.email ?? null) as string | null,
-    parentEmail1: (v.parentEmail1 ?? null) as string | null,
-    parentEmail2: (v.parentEmail2 ?? null) as string | null,
-    phone: (v.phone ?? null) as string | null,
+    name: String(v.name ?? fallbackName),
+    email: v.email ?? null,
+    parentEmail1: v.parentEmail1 ?? null,
+    parentEmail2: v.parentEmail2 ?? null,
+    phone: v.phone ?? null,
   };
 }
 
@@ -36,52 +67,91 @@ export async function GET(req: NextRequest) {
     // ---- Auth ----
     const authz = req.headers.get("Authorization");
     if (!authz?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+      return json({ error: "UNAUTHORIZED" }, 401);
     }
     const token = authz.slice("Bearer ".length);
-    const decoded = (await adminAuth.verifyIdToken(token)) as DecodedWithRole;
+
+    let decoded: DecodedWithRole;
+    try {
+      decoded = (await adminAuth.verifyIdToken(token)) as DecodedWithRole;
+    } catch {
+      return json({ error: "INVALID_TOKEN" }, 401);
+    }
 
     const uid = decoded.uid;
-    const email = ((decoded.email ?? "") as string).toLowerCase().trim();
+    const email = String((decoded.email ?? "")).toLowerCase().trim();
 
     // ---- 1) users/{uid} → studentId линкээр ----
     const userDoc = await adminDb.collection("users").doc(uid).get();
     if (userDoc.exists) {
       const u = userDoc.data() || {};
-      const sid: string = (u.studentId || u.studentID || u.student_id || "").toString().trim();
+      const sid = String(
+        u.studentId || u.studentID || u.student_id || ""
+      ).trim();
       if (sid) {
+        // ⚠️ DocumentReference дээр select() байхгүй — шууд get()
         const sdoc = await adminDb.collection("students").doc(sid).get();
         if (sdoc.exists) {
-          return NextResponse.json(mapStudentDoc(sdoc), { status: 200 });
+          return json(mapStudentDoc(sdoc), 200);
         }
       }
     }
 
     // ---- 2) Сурагч өөрөө: email == students.email ----
     if (email) {
-      const bySelf = await adminDb.collection("students").where("email", "==", email).limit(1).get();
+      const baseSelect = [
+        "firstName",
+        "firstname",
+        "lastName",
+        "lastname",
+        "name",
+        "class",
+        "grade",
+        "externalId",
+        "email",
+        "parentEmail1",
+        "parentEmail2",
+        "phone",
+      ] as const;
+
+      const bySelf = await adminDb
+        .collection("students")
+        .where("email", "==", email)
+        .select(...baseSelect)
+        .limit(1)
+        .get();
       if (!bySelf.empty) {
-        return NextResponse.json(mapStudentDoc(bySelf.docs[0]), { status: 200 });
+        return json(mapStudentDoc(bySelf.docs[0]), 200);
       }
 
       // ---- 3) Эцэг эх 1: email == students.parentEmail1 ----
-      const byP1 = await adminDb.collection("students").where("parentEmail1", "==", email).limit(1).get();
+      const byP1 = await adminDb
+        .collection("students")
+        .where("parentEmail1", "==", email)
+        .select(...baseSelect)
+        .limit(1)
+        .get();
       if (!byP1.empty) {
-        return NextResponse.json(mapStudentDoc(byP1.docs[0]), { status: 200 });
+        return json(mapStudentDoc(byP1.docs[0]), 200);
       }
 
       // ---- 4) Эцэг эх 2: email == students.parentEmail2 ----
-      const byP2 = await adminDb.collection("students").where("parentEmail2", "==", email).limit(1).get();
+      const byP2 = await adminDb
+        .collection("students")
+        .where("parentEmail2", "==", email)
+        .select(...baseSelect)
+        .limit(1)
+        .get();
       if (!byP2.empty) {
-        return NextResponse.json(mapStudentDoc(byP2.docs[0]), { status: 200 });
+        return json(mapStudentDoc(byP2.docs[0]), 200);
       }
     }
 
     // Олдсонгүй
-    return NextResponse.json({ error: "STUDENT_NOT_FOUND" }, { status: 404 });
-  } catch (e) {
+    return json({ error: "STUDENT_NOT_FOUND" }, 404);
+  } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[api/student/me] ERROR:", msg);
-    return NextResponse.json({ error: "SERVER_ERROR", detail: msg }, { status: 500 });
+    return json({ error: "SERVER_ERROR", detail: msg }, 500);
   }
 }

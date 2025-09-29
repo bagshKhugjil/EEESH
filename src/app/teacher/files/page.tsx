@@ -24,7 +24,7 @@ type QuizItem = {
   quizId: string;
   quizName: string;
   subject: string;
-  uploadedAt: string;
+  uploadedAt: string;                 // ISO
   uploadedByEmail: string | null;
   sourceFiles?: { part1?: string; part2?: string };
 };
@@ -43,8 +43,7 @@ export default function TeacherFilesPage() {
   const [items, setItems] = useState<QuizItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  const [q, setQ] = useState(""); // client-side search
+  const [q, setQ] = useState("");
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -59,7 +58,7 @@ export default function TeacherFilesPage() {
   const [lightMode, setLightMode] = useState(false);
   useEffect(() => {
     setMounted(true);
-    if (localStorage.getItem("theme") === "light") {
+    if (typeof window !== "undefined" && localStorage.getItem("theme") === "light") {
       setLightMode(true);
       document.documentElement.classList.add("light");
     }
@@ -77,11 +76,7 @@ export default function TeacherFilesPage() {
   };
 
   // modal
-  const [modal, setModal] = useState<ModalState>({
-    open: false,
-    title: "",
-    message: "",
-  });
+  const [modal, setModal] = useState<ModalState>({ open: false, title: "", message: "" });
   const openConfirm = (title: string, message: string, onConfirm: () => void) =>
     setModal({ open: true, title, message, onConfirm });
   const closeModal = () => setModal((m) => ({ ...m, open: false }));
@@ -97,12 +92,9 @@ export default function TeacherFilesPage() {
       const res = await fetch(`/api/teacher/files?subject=${encodeURIComponent(s)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data: { ok: boolean; items?: QuizItem[]; error?: string; detail?: string } =
-        await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.detail || data.error || "Алдаа гарлаа");
-      }
-      setItems(data.items ?? []);
+      const data: { ok: boolean; items?: QuizItem[]; error?: string; detail?: string } = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.detail || data.error || "Алдаа гарлаа");
+      setItems(Array.isArray(data.items) ? data.items : []);
     } catch (e) {
       setItems([]);
       setErr(e instanceof Error ? e.message : "Алдаа гарлаа");
@@ -129,6 +121,21 @@ export default function TeacherFilesPage() {
     }
   };
 
+  // Сонгогдоогүй үед анхны subject-г автоматаар сонгоё (optional)
+  useEffect(() => {
+    if (!subject && SUBJECTS.length) {
+      fetchFiles(SUBJECTS[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subject]);
+
+  const fmtDateTime = (iso?: string) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(+d)) return "—";
+    return d.toLocaleString();
+  };
+
   return (
     <div className="min-h-dvh" style={{ background: "var(--bg)", color: "var(--text)" }}>
       {/* Theme toggle */}
@@ -146,18 +153,12 @@ export default function TeacherFilesPage() {
 
       {/* Top nav */}
       <div className="pt-4 text-center">
-        <div
-          className="inline-flex gap-2 p-2 rounded-xl"
-          style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
-        >
+        <div className="inline-flex gap-2 p-2 rounded-xl" style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}>
           <Link href="/teacher" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
             Нүүр
           </Link>
           <Link href="/teacher/upload" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
             Дүн оруулах
-          </Link>
-          <Link href="/teacher/results" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
-            Дүн харах
           </Link>
           <Link href="/teacher/files" className="px-4 py-2 rounded-md font-bold" style={{ background: "var(--card2)", color: "var(--text)" }}>
             Файл удирдах
@@ -185,7 +186,7 @@ export default function TeacherFilesPage() {
                   style={{
                     border: `1px solid ${selected ? "#9fbfff" : "var(--stroke)"}`,
                     background: selected ? "rgba(139,184,255,.15)" : "var(--card2)",
-                    color: selected ? "var(--text)" : "var(--text)",
+                    color: "var(--text)",
                     transition: "background-color .2s, border-color .2s",
                   }}
                 >
@@ -199,7 +200,7 @@ export default function TeacherFilesPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Quiz нэр/имэйлээр хайх…"
+            placeholder="Файлын нэр/үүсгэсэн имэйлээр хайх…"
             className="w-full rounded-md px-3 py-2 text-sm sm:text-base"
             style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
           />
@@ -210,13 +211,8 @@ export default function TeacherFilesPage() {
         {/* States */}
         {loading && (
           <div className="space-y-2">
-            {/* simple skeletons */}
             {[...Array(5)].map((_, i) => (
-              <div
-                key={i}
-                className="h-14 rounded-xl animate-pulse"
-                style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
-              />
+              <div key={i} className="h-14 rounded-xl animate-pulse" style={{ background: "var(--card)", border: "1px solid var(--stroke)" }} />
             ))}
           </div>
         )}
@@ -233,26 +229,28 @@ export default function TeacherFilesPage() {
           </div>
         )}
 
-        {/* Mobile cards */}
+        {/* Mobile cards — Файлын нэр + Үүсгэсэн + Огноо */}
         {!loading && !err && filtered.length > 0 && (
           <>
             <div className="md:hidden space-y-3">
               {filtered.map((f) => {
                 const canDelete = user?.email && f.uploadedByEmail && user.email === f.uploadedByEmail;
                 return (
-                  <div
-                    key={f.id}
-                    className="rounded-2xl p-3"
-                    style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}
-                  >
+                  <div key={f.id} className="rounded-2xl p-3" style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-semibold truncate">{f.quizName}</div>
-                        <div className="text-xs text-[var(--muted)] mt-0.5">
-                          {f.subject} · {f.uploadedByEmail ?? "—"}
+                        <Link
+                          href={`/teacher/quizzes/${encodeURIComponent(f.id)}`}
+                          className="font-semibold truncate underline decoration-dotted hover:decoration-solid"
+                          title="Шалгалтын дүн рүү очих"
+                        >
+                          {f.quizName}
+                        </Link>
+                        <div className="text-xs text-[var(--muted)] mt-1">
+                          Үүсгэсэн: {f.uploadedByEmail ?? "—"}
                         </div>
-                        <div className="text-xs text-[var(--muted)] mt-0.5">
-                          {f.uploadedAt ? new Date(f.uploadedAt).toLocaleString() : "—"}
+                        <div className="text-xs text-[var(--muted)]">
+                          Огноо: {fmtDateTime(f.uploadedAt)}
                         </div>
                       </div>
                       <div className="shrink-0">
@@ -263,7 +261,7 @@ export default function TeacherFilesPage() {
                             onClick={() =>
                               openConfirm(
                                 "Архивлах уу?",
-                                `“${f.quizName}” бичлэгийг архивлахаар устгана. Үүнтэй холбоотой бүх дүн (students/*/results/${f.quizId}) мөн устгагдана.`,
+                                `“${f.quizName}” бичлэгийг архивлахаар устгана. Үүнтэй холбоотой бүх дүн (results_flat) мөн устгагдана.`,
                                 () => deleteQuiz(f)
                               )
                             }
@@ -282,14 +280,13 @@ export default function TeacherFilesPage() {
               })}
             </div>
 
-            {/* Desktop table */}
+            {/* Desktop table — Файлын нэр / Үүсгэсэн / Огноо / Үйлдэл */}
             <div className="hidden md:block overflow-auto border border-[var(--stroke)] rounded-xl">
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b" style={{ background: "var(--card2)", borderColor: "var(--stroke)" }}>
-                    <th className="px-3 py-2 text-left">Шалгалтын нэр</th>
-                    <th className="px-3 py-2 text-left">Хичээл</th>
-                    <th className="px-3 py-2 text-left">Оруулсан</th>
+                    <th className="px-3 py-2 text-left">Файлын нэр</th>
+                    <th className="px-3 py-2 text-left">Үүсгэсэн</th>
                     <th className="px-3 py-2 text-left">Огноо</th>
                     <th className="px-3 py-2 text-right">Үйлдэл</th>
                   </tr>
@@ -299,30 +296,47 @@ export default function TeacherFilesPage() {
                     const canDelete = user?.email && f.uploadedByEmail && user.email === f.uploadedByEmail;
                     return (
                       <tr key={f.id} className="border-b" style={{ borderColor: "var(--stroke)" }}>
-                        <td className="px-3 py-2 font-semibold">{f.quizName}</td>
-                        <td className="px-3 py-2">{f.subject}</td>
+                        <td className="px-3 py-2">
+                          <Link
+                            href={`/teacher/quizzes/${encodeURIComponent(f.id)}`}
+                            className="font-semibold underline decoration-dotted hover:decoration-solid"
+                            title="Шалгалтын дүн рүү очих"
+                          >
+                            {f.quizName}
+                          </Link>
+                        </td>
                         <td className="px-3 py-2">{f.uploadedByEmail ?? "—"}</td>
-                        <td className="px-3 py-2">{f.uploadedAt ? new Date(f.uploadedAt).toLocaleString() : "—"}</td>
+                        <td className="px-3 py-2">{fmtDateTime(f.uploadedAt)}</td>
                         <td className="px-3 py-2 text-right">
-                          {canDelete ? (
-                            <button
+                          <div className="inline-flex gap-2">
+                            <Link
+                              href={`/teacher/quizzes/${encodeURIComponent(f.id)}`}
                               className="px-3 py-1.5 rounded-lg text-sm"
-                              style={{ background: "#ff4d4d2b", color: "#ff8b8b", border: "1px solid #ff4d4d88" }}
-                              onClick={() =>
-                                openConfirm(
-                                  "Архивлах уу?",
-                                  `“${f.quizName}” бичлэгийг архивлахаар устгана. Үүнтэй холбоотой бүх дүн (students/*/results/${f.quizId}) мөн устгагдана.`,
-                                  () => deleteQuiz(f)
-                                )
-                              }
+                              style={{ background: "var(--bg)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+                              title="Дүн харах"
                             >
-                              Архивлах
-                            </button>
-                          ) : (
-                            <span className="text-xs" style={{ color: "var(--muted)" }}>
-                              Зөвхөн эзэмшигч
-                            </span>
-                          )}
+                              Нээх
+                            </Link>
+                            {canDelete ? (
+                              <button
+                                className="px-3 py-1.5 rounded-lg text-sm"
+                                style={{ background: "#ff4d4d2b", color: "#ff8b8b", border: "1px solid #ff4d4d88" }}
+                                onClick={() =>
+                                  openConfirm(
+                                    "Архивлах уу?",
+                                    `“${f.quizName}” бичлэгийг архивлахаар устгана. Үүнтэй холбоотой бүх дүн (results_flat) мөн устгагдана.`,
+                                    () => deleteQuiz(f)
+                                  )
+                                }
+                              >
+                                Архивлах
+                              </button>
+                            ) : (
+                              <span className="text-xs" style={{ color: "var(--muted)" }}>
+                                Зөвхөн эзэмшигч
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -341,10 +355,7 @@ export default function TeacherFilesPage() {
           style={{ background: "rgba(0,0,0,.6)", backdropFilter: "blur(4px)" }}
           onClick={(e) => e.currentTarget === e.target && closeModal()}
         >
-          <div
-            className="rounded-2xl p-6 w-[92%] max-w-[420px] text-center"
-            style={{ background: "var(--bg)", border: "1px solid var(--stroke)" }}
-          >
+          <div className="rounded-2xl p-6 w-[92%] max-w-[420px] text-center" style={{ background: "var(--bg)", border: "1px solid var(--stroke)" }}>
             <h3 className="m-0 text-lg font-bold mb-2">{modal.title}</h3>
             <p className="mb-5" style={{ color: "var(--muted)" }}>
               {modal.message}

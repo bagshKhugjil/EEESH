@@ -2,6 +2,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/adminApp";
 import { DecodedIdToken } from "firebase-admin/auth";
+import { FieldValue } from "firebase-admin/firestore";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 interface DecodedTokenWithRole extends DecodedIdToken {
   role?: string;
@@ -15,7 +19,7 @@ type StudentMappedRow = {
   class?: string;
   parentEmail1?: string;
   parentEmail2?: string;
-  externalId?: string;
+  externalId?: string | number;
 };
 
 async function requireAdmin(req: NextRequest): Promise<void> {
@@ -27,7 +31,6 @@ async function requireAdmin(req: NextRequest): Promise<void> {
 }
 
 function genTempPassword(len = 12) {
-  // энгийн бат бөх түр нууц үг
   const chars =
     "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
   let out = "";
@@ -35,94 +38,150 @@ function genTempPassword(len = 12) {
   return out;
 }
 
+function cleanStr(s: unknown): string {
+  return typeof s === "string" ? s.trim() : "";
+}
+
+function nonEmptyOrNull(v: unknown): string | null {
+  const s = cleanStr(v);
+  return s ? s : null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     await requireAdmin(req);
-    const body = (await req.json()) as { rows: StudentMappedRow[] };
 
-    if (!body?.rows?.length) {
-      return NextResponse.json({ error: "Мөр илгээгдсэнгүй." }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "BAD_JSON" }, { status: 400 });
     }
 
-    const results: { email: string; status: string }[] = [];
+    const rows = Array.isArray((body as any)?.rows) ? ((body as any).rows as StudentMappedRow[]) : null;
+    if (!rows?.length) {
+      return NextResponse.json({ error: "rows required" }, { status: 400 });
+    }
+    if (rows.length > 1000) {
+      return NextResponse.json({ error: "too many rows (max 1000)" }, { status: 400 });
+    }
 
-    for (const row of body.rows) {
-      const email = (row.email || "").trim().toLowerCase();
-      const firstName = (row.firstName || "").trim();
-      const lastName = (row.lastName || "").trim();
+    const results: Array<{
+      email: string;
+      uid?: string;
+      status: "OK" | "SKIP" | "ERROR";
+      detail?: string;
+    }> = [];
+
+    for (const row of rows) {
+      const email = cleanStr(row.email).toLowerCase();
+      const firstName = cleanStr(row.firstName);
+      const lastName = cleanStr(row.lastName);
 
       if (!email || !firstName || !lastName) {
-        results.push({ email: row.email || "(хоосон)", status: "❌ Алдаа: шаардлагатай талбар дутуу" });
+        results.push({ email: row.email || "(empty)", status: "ERROR", detail: "missing required fields" });
         continue;
       }
 
       try {
-        // 1) Firebase Auth дээр хэрэглэгч байгаа эсэх
-        let uid: string | null = null;
-        let existingClaims: Record<string, unknown> | undefined;
+        // 1) Firebase Auth дээр шалгах
+        let uid: string;
+        let claims: Record<string, any> | undefined;
 
         try {
           const existing = await adminAuth.getUserByEmail(email);
           uid = existing.uid;
-          existingClaims = (existing.customClaims as Record<string, unknown>) || undefined;
+          claims = (existing.customClaims as Record<string, any>) || undefined;
 
-          // displayName-г овог нэртэй нийцүүлж шинэчлэх (сонголттой)
           const nextDisplay = `${firstName} ${lastName}`.trim();
           if (existing.displayName !== nextDisplay) {
             await adminAuth.updateUser(uid, { displayName: nextDisplay });
           }
         } catch {
-          // байхгүй бол шинээр үүсгэнэ
+          // байхгүй бол үүсгэнэ
           const created = await adminAuth.createUser({
             email,
             password: genTempPassword(),
             displayName: `${firstName} ${lastName}`.trim(),
           });
           uid = created.uid;
+          claims = undefined;
         }
 
-        // 2) Role: student (боломжит өөр claims-ийг хадгалж үлдээнэ)
-        await adminAuth.setCustomUserClaims(uid!, { ...(existingClaims || {}), role: "student" });
+        // 2) Role тохируулах: хэрэв одоо admin/teacher бол оролдохгүй, эс бөгөөс student болгоно
+        const role = (claims?.role as string | undefined) || "student";
+        const keepAsIs = role === "admin" || role === "teacher";
+        if (!keepAsIs) {
+          await adminAuth.setCustomUserClaims(uid, { ...(claims || {}), role: "student" });
+        }
 
-        // 3) Firestore students/{uid}
-        const docRef = adminDb.collection("students").doc(uid!);
+        // 3) Firestore students/{uid} (upsert, хоосон талбаруудыг null болгохгүйгээр тавина)
+        const dataToSet: Record<string, any> = {
+          id: uid,
+          firstName,
+          lastName,
+          email,
+          updatedAt: FieldValue.serverTimestamp(),
+        };
+
+        // зөвхөн ирсэн, хоосон биш утгуудыг тавина
+        const grade = nonEmptyOrNull(row.grade);
+        const klass = nonEmptyOrNull(row.class);
+        const p1 = nonEmptyOrNull(row.parentEmail1);
+        const p2 = nonEmptyOrNull(row.parentEmail2);
+
+        if (grade) dataToSet.grade = grade;
+        if (klass) dataToSet.class = klass;
+        if (p1) dataToSet.parentEmail1 = p1;
+        if (p2) dataToSet.parentEmail2 = p2;
+
+        if (row.externalId !== undefined && row.externalId !== null && cleanStr(String(row.externalId))) {
+          // externalId-г тоо хэлбэртэй байж болно — төрөл заавалчлахгүй, query талд in [] 10-10-аар ашиглана
+          dataToSet.externalId = typeof row.externalId === "number" ? row.externalId : cleanStr(String(row.externalId));
+        }
+
+        // createdAt-ыг анх удаа байршуулах үед л хэрэгтэй — нэмэлт уншилт хийхгүйн тулд
+        // зөвхөн set({ merge: true }) + ifMissing hack хийхгүй, createdAt-г үргэлж тавьж болох ч
+        // serverTimestamp() дахин шинэчлэх тул createdAt-ыг тусад нь авахаас өөр аргагүй байдаг.
+        // Энд энгийнээр: document байхгүй тохиолдолд createdAt-ыг тавихын тулд жижиг try-get ашиглая.
+        const docRef = adminDb.collection("students").doc(uid);
         const snap = await docRef.get();
-        await docRef.set(
-          {
-            id: uid,
-            firstName,
-            lastName,
-            email,
-            grade: row.grade || null,
-            class: row.class || null,
-            parentEmail1: row.parentEmail1 || null,
-            parentEmail2: row.parentEmail2 || null,
-            externalId: row.externalId || null,
-            role: "student",
-            createdAt: snap.exists ? snap.get("createdAt") ?? new Date() : new Date(),
-            updatedAt: new Date(),
-          },
-          { merge: true }
-        );
+        if (!snap.exists) {
+          dataToSet.createdAt = FieldValue.serverTimestamp();
+        } else if (!snap.get("createdAt")) {
+          dataToSet.createdAt = snap.get("createdAt") ?? FieldValue.serverTimestamp();
+        }
 
-        results.push({ email, status: "✅ Амжилттай" });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        results.push({ email: row.email || "(хоосон)", status: `❌ ${msg}` });
+        await docRef.set(dataToSet, { merge: true });
+
+        results.push({ email, uid, status: "OK" });
+      } catch (err) {
+        results.push({
+          email,
+          status: "ERROR",
+          detail: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
+    const ok = results.filter((r) => r.status === "OK").length;
+    const skip = results.filter((r) => r.status === "SKIP").length;
+    const fail = results.filter((r) => r.status === "ERROR").length;
+
     return NextResponse.json(
-      { results, summary: { total: body.rows.length, ok: results.filter(r => r.status.startsWith("✅")).length } },
+      {
+        ok: true,
+        summary: { total: rows.length, ok, skip, fail },
+        results,
+        note:
+          "students коллецод өөрчлөлт орсон тул Cloud Function (updateStudentsList) автоматаар meta/studentsList-ийг синк хийнэ.",
+      },
       { status: 200 }
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    if (msg === "UNAUTHENTICATED")
-      return NextResponse.json({ error: "Хандах эрхгүй" }, { status: 401 });
-    if (msg === "FORBIDDEN")
-      return NextResponse.json({ error: "Админ эрх шаардлагатай" }, { status: 403 });
-    console.error("import-mapped error:", msg);
-    return NextResponse.json({ error: "Дотоод алдаа гарлаа." }, { status: 500 });
+    const msg = e instanceof Error ? e.message : "SERVER_ERROR";
+    const status = msg === "UNAUTHENTICATED" ? 401 : msg === "FORBIDDEN" ? 403 : 500;
+    if (status === 500) console.error("[admin/import-mapped] error:", msg);
+    return NextResponse.json({ ok: false, error: msg }, { status });
   }
 }

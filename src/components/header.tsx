@@ -59,7 +59,6 @@ export function Header() {
     navLinks = [
         { href: "/teacher", label: "Нүүр" },
         { href: "/teacher/upload", label: "Дүн оруулах" },
-        { href: "/teacher/results", label: "Дүн харах" },
         { href: "/teacher/files", label: "Файл удирдлага" },
     ];
   } else if (user?.role === 'student') {

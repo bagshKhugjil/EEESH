@@ -22,13 +22,6 @@ function TeacherHomePage() {
             <Upload className="w-5 h-5 transition-transform group-hover:-translate-y-1" />
             <span>Сорил дүн оруулах</span>
           </Link>
-          <Link 
-             href="/teacher/results"
-             className="group flex items-center justify-center gap-3 bg-card2 border border-stroke text-text font-bold px-8 py-4 rounded-lg text-base transition-transform hover:scale-105"
-          >
-             <BarChart2 className="w-5 h-5 transition-transform group-hover:-translate-y-1" />
-            <span>Дүн харах</span>
-          </Link>
         </div>
       </div>
     </div>

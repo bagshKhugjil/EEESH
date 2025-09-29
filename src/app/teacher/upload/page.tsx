@@ -54,10 +54,13 @@ type MergedRow = {
   part2?: Omit<ParsedRow, "externalId" | "className" | "firstName" | "lastName">;
 };
 
+// ---- API payload-д class, date нэмэгдсэн хувилбар ----
 type UploadPayload = {
   subject: Subject | string;
+  class: string;        // ШИНЭ
+  date: string;         // ШИНЭ (YYYY-MM-DD)
   quizName: string;
-  uploadedAt: string; // ISO
+  uploadedAt: string;   // ISO
   rows: MergedRow[];
   sourceFiles: {
     part1?: string;
@@ -98,6 +101,13 @@ export default function TeacherUploadPage() {
 
   // SUBJECT / FILES
   const [subject, setSubject] = useState<string>("");
+  const [className, setClassName] = useState<string>("");      // ШИНЭ
+  const [dateYMD, setDateYMD] = useState<string>(() => {       // ШИНЭ (өнөөдрийн өдрөөр эхлүүлэв)
+    const d = new Date();
+    const pad = (n:number)=>String(n).padStart(2,"0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  });
+
   const [filePart1, setFilePart1] = useState<File | null>(null);
   const [filePart2, setFilePart2] = useState<File | null>(null);
   const fileInput1Ref = useRef<HTMLInputElement>(null);
@@ -232,9 +242,11 @@ export default function TeacherUploadPage() {
 
   // ==== UPLOAD ====
   const doUpload = async () => {
-    if (!subject) return openModal("Анхааруулга", "Хичээлээ сонгоно уу!", "warning");
+    if (!subject)   return openModal("Анхааруулга", "Хичээлээ сонгоно уу!", "warning");
+    if (!className) return openModal("Анхааруулга", "Ангиа оруулна уу! (ж: 12A)", "warning");   // ШИНЭ
+    if (!dateYMD)   return openModal("Анхааруулга", "Огноо сонгоно уу! (YYYY-MM-DD)", "warning"); // ШИНЭ
     if (!filePart1) return openModal("Анхааруулга", "1-р хэсгийн файлаа сонгоно уу!", "warning");
-    if (!user) return openModal("Анхааруулга", "Нэвтэрсэн байх шаардлагатай.", "warning");
+    if (!user)      return openModal("Анхааруулга", "Нэвтэрсэн байх шаардлагатай.", "warning");
 
     setStatus("Файл(ууд) уншиж байна…");
     try {
@@ -249,6 +261,8 @@ export default function TeacherUploadPage() {
 
       const payload: UploadPayload = {
         subject,
+        class: className,                 // ШИНЭ
+        date: dateYMD,                    // ШИНЭ (YYYY-MM-DD)
         quizName: makeQuizName(subject, filePart1, filePart2),
         uploadedAt: new Date().toISOString(),
         rows,
@@ -267,23 +281,29 @@ export default function TeacherUploadPage() {
       });
 
       type ApiResp =
-        | { ok: true; quizId: string; inserted: number; updated: number }
-        | { ok: false; error: string };
+        | { ok: true; quizId: string; counts?: { matchedStudents: number; inputRows: number }; stats?: any }
+        | { ok: false; error: string; detail?: string };
 
       const data: ApiResp = await res.json();
       if (!res.ok || !("ok" in data) || data.ok !== true) {
-        const msg = "error" in data ? data.error : "Серверийн алдаа.";
+        const msg = "error" in data ? (data.detail || data.error) : "Серверийн алдаа.";
         throw new Error(msg);
       }
 
       openModal(
         "Амжилттай",
-        `“${payload.quizName}” илгээгдлээ. Нийт ${data.inserted + data.updated} мөр.`,
+        `“${payload.quizName}” илгээгдлээ. Нийт мөр: ${data.counts?.inputRows ?? "?"}, таарсан сурагч: ${data.counts?.matchedStudents ?? "?"}.`,
         "success"
       );
 
       // reset
       setSubject("");
+      setClassName("");
+      setDateYMD(() => {
+        const d = new Date();
+        const pad = (n:number)=>String(n).padStart(2,"0");
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      });
       setFilePart1(null);
       setFilePart2(null);
       if (fileInput1Ref.current) fileInput1Ref.current.value = "";
@@ -296,7 +316,6 @@ export default function TeacherUploadPage() {
     }
   };
 
-  // modal өнгө (warning өнгөний жижиг тэмдэгтийн алдаа зассан)
   const isLight = mounted && document.documentElement.classList.contains("light");
   const modalTitleColor =
     modalType === "success" ? (isLight ? "#10b981" : "#9af5e3")
@@ -331,9 +350,6 @@ export default function TeacherUploadPage() {
           <Link href="/teacher/upload" className="px-3 sm:px-4 py-2 rounded-md font-bold" style={{ background: "var(--card2)", color: "var(--text)" }}>
             Дүн оруулах
           </Link>
-          <Link href="/teacher/results" className="px-3 sm:px-4 py-2 rounded-md font-bold" style={{ color: "var(--muted)" }}>
-            Дүн харах
-          </Link>
           <Link href="/teacher/files" className="px-3 sm:px-4 py-2 rounded-md font-bold" style={{ color: "var(--muted)" }}>
             Файл удирдлага
           </Link>
@@ -344,7 +360,7 @@ export default function TeacherUploadPage() {
         <div className="card rounded-2xl p-4 sm:p-6" style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}>
           <label className="block mb-3 font-bold">Хичээлээ сонго</label>
 
-          {/* SUBJECT GRID: auto-fit responsive */}
+          {/* SUBJECT GRID */}
           <div
             className="grid gap-2 sm:gap-3 mb-4"
             style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}
@@ -366,6 +382,30 @@ export default function TeacherUploadPage() {
                 </button>
               );
             })}
+          </div>
+
+          {/* EXTRA FIELDS: CLASS + DATE */}
+          <div className="grid gap-3 sm:grid-cols-2 mb-4">
+            <div>
+              <label className="block mb-1 text-sm font-semibold">Анги *</label>
+              <input
+                value={className}
+                onChange={(e)=>setClassName(e.target.value)}
+                placeholder="ж: 12A"
+                className="w-full rounded-md px-3 py-2 text-sm"
+                style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+              />
+            </div>
+            <div>
+              <label className="block mb-1 text-sm font-semibold">Огноо (YYYY-MM-DD) *</label>
+              <input
+                type="date"
+                value={dateYMD}
+                onChange={(e)=>setDateYMD(e.target.value)}
+                className="w-full rounded-md px-3 py-2 text-sm"
+                style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+              />
+            </div>
           </div>
 
           {/* Upload areas */}
@@ -439,7 +479,7 @@ export default function TeacherUploadPage() {
             </div>
           )}
 
-          {/* Footer actions (wrap on mobile) */}
+          {/* Footer actions */}
           <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
             <a
               className="rounded-xl font-bold px-4 py-2 text-center"

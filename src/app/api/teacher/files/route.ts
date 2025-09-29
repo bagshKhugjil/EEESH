@@ -3,65 +3,77 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/adminApp";
 import { DecodedIdToken } from "firebase-admin/auth";
 
-interface DecodedWithRole extends DecodedIdToken {
-  role?: string;
-}
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-type FileItem = {
-  id: string;
-  quizId: string;
-  quizName: string;
+type AllowedRole = "teacher" | "admin";
+interface DecodedWithRole extends DecodedIdToken { role?: string | null }
+
+type QuizRow = {
+  id: string;             // quizId
+  title: string;          // quizName эсвэл title
   subject: string;
-  uploadedAt: string;        // ISO
+  class: string;
+  date: string;           // YYYY-MM-DD
+  uploadedAt: string;     // ISO
   uploadedByEmail: string | null;
-  sourceFiles?: { part1?: string; part2?: string };
 };
+
+function noStoreJson(body: unknown, status = 200) {
+  const res = NextResponse.json(body, { status });
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
 
 export async function GET(req: NextRequest) {
   try {
-    // --- auth ---
+    // ---- Auth
     const authz = req.headers.get("Authorization");
-    if (!authz?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    }
+    if (!authz?.startsWith("Bearer ")) return noStoreJson({ error: "UNAUTHORIZED" }, 401);
     const token = authz.slice("Bearer ".length);
     const decoded = (await adminAuth.verifyIdToken(token)) as DecodedWithRole;
-    if (!decoded.role || (decoded.role !== "teacher" && decoded.role !== "admin")) {
-      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
-    }
 
-    // --- query ---
+    const role = decoded.role ?? "";
+    const isTeacher = role === "teacher";
+    const isAdmin = role === "admin";
+    if (!(isTeacher || isAdmin)) return noStoreJson({ error: "FORBIDDEN" }, 403);
+
+    // ---- Query params
     const { searchParams } = new URL(req.url);
-    const subject = searchParams.get("subject")?.trim();
-    const q = (searchParams.get("q") || "").trim().toLowerCase();
-    const limitParam = Number(searchParams.get("limit") || 500);
-    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 1000) : 500;
+    const subject = searchParams.get("subject")?.trim() || ""; // optional
+    const q = (searchParams.get("q") || "").trim().toLowerCase(); // optional free-text filter (client-like)
+    const limitParam = Number(searchParams.get("limit") || 200);
+    const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 500) : 200;
 
-    if (!subject) {
-      return NextResponse.json({ error: "subject required" }, { status: 400 });
+    // ---- Build Firestore query (зөвхөн where-үүд)
+    let qry: FirebaseFirestore.Query = adminDb.collection("quizzes");
+
+    // Teacher → зөвхөн өөрийн оруулсан
+    if (isTeacher) {
+      qry = qry.where("uploadedBy", "==", decoded.uid);
+    }
+    // Subject ирсэн бол бас шүүнэ
+    if (subject) {
+      qry = qry.where("subject", "==", subject);
     }
 
-    // --- firestore query: ЗӨВХӨН where, orderBy АВАХ ---
-    // (orderBy("uploadedAt","desc") арилгаснаар композит индекс шаардлагагүй болно)
-    const snap = await adminDb
-      .collection("quizzes")
-      .where("subject", "==", subject)
-      .limit(limit)
-      .get();
+    // (orderBy арилгасан — индекс шаардахгүй, сервер талдаа эрэмбэлнэ)
+    const snap = await qry.limit(limit).get();
 
-    // --- map ---
-    const rows: FileItem[] = snap.docs.map((d) => {
-      const data = d.data() as {
+    const rows: QuizRow[] = snap.docs.map((d) => {
+      const v = d.data() as {
         quizName?: string;
+        title?: string;
         subject?: string;
+        class?: string;
+        date?: string;
         uploadedAt?: FirebaseFirestore.Timestamp | Date | string;
         uploadedByEmail?: string | null;
-        sourceFiles?: { part1?: string; part2?: string };
       };
 
-      // uploadedAt-г ISO болгоно
+      // uploadedAt → ISO
       let uploadedAtISO = "";
-      const ua = data?.uploadedAt;
+      const ua = v?.uploadedAt;
       if (ua && typeof (ua as any).toDate === "function") {
         uploadedAtISO = (ua as FirebaseFirestore.Timestamp).toDate().toISOString();
       } else if (ua instanceof Date) {
@@ -72,37 +84,37 @@ export async function GET(req: NextRequest) {
 
       return {
         id: d.id,
-        quizId: d.id,
-        quizName: data?.quizName || d.id,
-        subject: data?.subject || subject,
+        title: v.title || v.quizName || d.id,
+        subject: v.subject || subject || "",
+        class: v.class || "",
+        date: v.date || "",
         uploadedAt: uploadedAtISO,
-        uploadedByEmail: data?.uploadedByEmail ?? null,
-        sourceFiles: data?.sourceFiles ?? {},
+        uploadedByEmail: v.uploadedByEmail ?? null,
       };
     });
 
-    // --- сервер талдаа эрэмбэлнэ (шинэ нь эхэнд) ---
-    rows.sort((a, b) => {
+    // Free-text хайлт (нэр, имэйл) — сервер талдаа шүүнэ
+    const filtered = q
+      ? rows.filter((r) => {
+          const hay = `${r.title} ${r.uploadedByEmail ?? ""}`.toLowerCase();
+          return hay.includes(q);
+        })
+      : rows;
+
+    // uploadedAt буурахаар эрэмбэлнэ (шинэ нь эхэнд)
+    filtered.sort((a, b) => {
       const ta = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
       const tb = b.uploadedAt ? Date.parse(b.uploadedAt) : 0;
       return tb - ta;
     });
 
-    // --- Хэрэв q(хайлт) ирсэн бол энд шүүнэ (нэр, мэйлээр) ---
-    const filtered = q
-      ? rows.filter((r) => {
-          const hay = `${r.quizName} ${r.uploadedByEmail ?? ""}`.toLowerCase();
-          return hay.includes(q);
-        })
-      : rows;
-
-    return NextResponse.json({ ok: true, items: filtered }, { status: 200 });
+    return noStoreJson({ ok: true, items: filtered }, 200);
   } catch (e) {
     const err = e as { message?: string; code?: string };
     console.error("GET /api/teacher/files error:", err);
-    return NextResponse.json(
+    return noStoreJson(
       { ok: false, error: "SERVER_ERROR", detail: err?.message ?? "", code: err?.code ?? "" },
-      { status: 500 }
+      500
     );
   }
 }

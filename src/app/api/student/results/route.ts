@@ -1,3 +1,4 @@
+// src/app/api/student/results/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/adminApp";
 import { DecodedIdToken } from "firebase-admin/auth";
@@ -8,129 +9,127 @@ export const dynamic = "force-dynamic";
 type AllowedRole = "student" | "teacher" | "admin";
 interface DecodedWithRole extends DecodedIdToken { role?: AllowedRole | string }
 
-// ---------- Төрөл ----------
+// ---------- Types ----------
 type HistoryPoint = { date: string; total: number; part1?: number; part2?: number };
 type SubjectResult = { average: number; history: HistoryPoint[] };
 type ResultsByStudent = Record<string, Record<string, SubjectResult>>;
 
-// ---------- Util ----------
-function toYMD(d: any): string {
-  try {
-    if (!d) return "";
-    if (typeof d?.toDate === "function") d = d.toDate();
-    const dt = typeof d === "string" ? new Date(d) : (d as Date);
-    if (!(dt instanceof Date) || isNaN(dt.getTime())) return "";
-    const y = dt.getFullYear();
-    const m = String(dt.getMonth() + 1).padStart(2, "0");
-    const dd = String(dt.getDate()).padStart(2, "0");
-    return `${y}-${m}-${dd}`;
-  } catch { return ""; }
+// ---------- Helpers ----------
+function noStoreJson(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
-const toNum = (v: any): number | undefined => {
-  if (typeof v === "number" && isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "" && !isNaN(Number(v))) return Number(v);
+const toNum = (v: unknown): number | undefined => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
   return undefined;
 };
 
-// Firestore-д part1/part2 нь шууд тоо эсвэл {percentCorrect, numCorrect, numQuestions} байж болно
-function extractPartPercent(x: any): number | undefined {
+function extractPartPercent(x: unknown): number | undefined {
   const direct = toNum(x);
   if (direct !== undefined) return direct;
 
   if (x && typeof x === "object") {
-    const pc = toNum(x.percentCorrect);
+    const obj = x as Record<string, unknown>;
+    const pc = toNum(obj.percentCorrect);
     if (pc !== undefined) return pc;
-
-    const nc = toNum(x.numCorrect), nq = toNum(x.numQuestions);
-    if (nc !== undefined && nq) {
-      return Number(((nc / nq) * 100).toFixed(1));
-    }
+    const nc = toNum(obj.numCorrect);
+    const nq = toNum(obj.numQuestions);
+    if (nc !== undefined && nq && nq > 0) return Number(((nc / nq) * 100).toFixed(1));
   }
   return undefined;
 }
 
-// Нийт хувийг гаргана: direct > жинлэсэн(p1/p2) > ганц хэсэг
-function computeTotals(v: any): { total: number | null; part1?: number; part2?: number } {
-  const direct = v?.percentCorrect ?? v?.percentage ?? v?.percent ?? v?.score ?? v?.average ?? v?.total;
-  const directNum = typeof direct === "string" ? Number(direct) : direct;
+function computeTotals(row: { score?: unknown; raw?: any }): { total: number | null; part1?: number; part2?: number } {
+  const direct = toNum(row.score);
+  const p1 = extractPartPercent(row?.raw?.part1);
+  const p2 = extractPartPercent(row?.raw?.part2);
 
-  const p1 = extractPartPercent(v?.part1);
-  const p2 = extractPartPercent(v?.part2);
+  if (typeof direct === "number") return { total: Number(direct), part1: p1, part2: p2 };
 
-  if (typeof directNum === "number" && isFinite(directNum)) {
-    return { total: Number(directNum), part1: p1, part2: p2 };
-  }
-
-  // Жинлэсэн дундаж (асуултын тоогоор) — боломжтой үед
-  const n1 = toNum(v?.part1?.numQuestions) ?? 0;
-  const n2 = toNum(v?.part2?.numQuestions) ?? 0;
+  // Weighted by questions if available
+  const n1 = toNum(row?.raw?.part1?.numQuestions) ?? 0;
+  const n2 = toNum(row?.raw?.part2?.numQuestions) ?? 0;
   if (typeof p1 === "number" && typeof p2 === "number" && (n1 + n2) > 0) {
     const total = Number(((p1 * n1 + p2 * n2) / (n1 + n2)).toFixed(1));
     return { total, part1: p1, part2: p2 };
   }
 
-  // Ганц хэсэг байвал тэрийг нийт гэж үзнэ
   if (typeof p1 === "number") return { total: p1, part1: p1, part2: p2 };
   if (typeof p2 === "number") return { total: p2, part1: p1, part2: p2 };
-
   return { total: null, part1: p1, part2: p2 };
 }
 
 // ---------- Handler ----------
 export async function GET(req: NextRequest) {
   try {
+    // 1) Auth
     const authz = req.headers.get("Authorization");
-    if (!authz?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    }
+    if (!authz?.startsWith("Bearer ")) return noStoreJson({ error: "UNAUTHORIZED" }, 401);
     const token = authz.slice("Bearer ".length);
-    const decoded = (await adminAuth.verifyIdToken(token)) as DecodedWithRole;
 
-    // зөвшөөрөгдсөн сурагчийн id
-    const email = ((decoded.email ?? "") as string).toLowerCase().trim();
+    let decoded: DecodedWithRole;
+    try {
+      decoded = (await adminAuth.verifyIdToken(token)) as DecodedWithRole;
+    } catch {
+      return noStoreJson({ error: "INVALID_TOKEN" }, 401);
+    }
+
+    const uid = decoded.uid;
+    const email = String(decoded.email ?? "").toLowerCase().trim();
+
+    // 2) studentId олох (users/{uid}.studentId → students.email/parentEmailX fallback)
     let studentId: string | null = null;
 
-    const udoc = await adminDb.collection("users").doc(decoded.uid).get();
-    if (udoc.exists) {
-      const u = udoc.data() || {};
+    const linkDoc = await adminDb.collection("users").doc(uid).get();
+    if (linkDoc.exists) {
+      const u = linkDoc.data() || {};
       const sid = String(u.studentId || u.studentID || u.student_id || "").trim();
       if (sid) studentId = sid;
     }
+
     if (!studentId && email) {
-      for (const field of ["email", "parentEmail1", "parentEmail2"]) {
-        const snap = await adminDb.collection("students").where(field, "==", email).limit(1).get();
+      for (const field of ["email", "parentEmail1", "parentEmail2"] as const) {
+        const snap = await adminDb.collection("students").where(field, "==", email).select().limit(1).get();
         if (!snap.empty) { studentId = snap.docs[0].id; break; }
       }
     }
-    if (!studentId) return NextResponse.json({ error: "STUDENT_NOT_FOUND" }, { status: 404 });
 
-    // results/*
-    const rSnap = await adminDb
-      .collection("students").doc(studentId)
-      .collection("results")
+    if (!studentId) return noStoreJson({ error: "STUDENT_NOT_FOUND" }, 404);
+
+    // 3) results_flat-аас тухайн оюутны бүх дүнг хамгийн бага талбараар унших
+    // fields: subject, date(YYYY-MM-DD), score, raw.part1, raw.part2
+    const resSnap = await adminDb
+      .collection("results_flat")
+      .where("studentId", "==", studentId)
+      .select("subject", "date", "score", "raw.part1", "raw.part2")
       .limit(1000)
       .get();
 
+    // 4) Агрегац: subject -> { average, history[] }
     const perSubject: Record<string, { totals: number[]; history: HistoryPoint[] }> = {};
     const subjectSet = new Set<string>();
 
-    for (const d of rSnap.docs) {
-      const v: any = d.data() || {};
+    for (const d of resSnap.docs) {
+      const v = d.data() as {
+        subject?: string;
+        date?: string;
+        score?: number | string;
+        raw?: { part1?: unknown; part2?: unknown };
+      };
+
       const subject = String(v.subject ?? "").trim();
       if (!subject) continue;
       subjectSet.add(subject);
 
-      const { total, part1, part2 } = computeTotals(v);
+      const { total, part1, part2 } = computeTotals({ score: v.score, raw: v.raw });
       if (total == null) continue;
 
-      const date =
-        toYMD(v.updatedAt) ||
-        toYMD(v.uploadedAt) ||
-        toYMD(v.date) ||
-        toYMD((d as any).updateTime?.toDate?.()) ||
-        toYMD((d as any).createTime?.toDate?.()) ||
-        "";
+      // date нь `YYYY-MM-DD` хэлбэр гэж тохирсон
+      const date = (typeof v.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.date)) ? v.date : "";
 
       if (!perSubject[subject]) perSubject[subject] = { totals: [], history: [] };
       perSubject[subject].totals.push(total);
@@ -142,7 +141,6 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // finalize
     const subjectRes: Record<string, SubjectResult> = {};
     Object.entries(perSubject).forEach(([subj, agg]) => {
       const avg = agg.totals.length
@@ -158,10 +156,11 @@ export async function GET(req: NextRequest) {
       subjects: Array.from(subjectSet).sort(),
       results: { [studentId]: subjectRes },
     };
-    return NextResponse.json(payload);
+
+    return noStoreJson(payload, 200);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[api/student/results] ERROR:", msg);
-    return NextResponse.json({ error: "SERVER_ERROR", detail: msg }, { status: 500 });
+    return noStoreJson({ error: "SERVER_ERROR", detail: msg }, 500);
   }
 }
