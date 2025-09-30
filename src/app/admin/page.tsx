@@ -1,6 +1,6 @@
 // src/app/admin/page.tsx
 "use client";
-
+import StudentResultsTab from "@/components/admin/StudentResultsTab";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import Image from "next/image";
@@ -8,6 +8,12 @@ import Link from "next/link";
 import { withRole } from "@/components/withRole";
 import { useAuth } from "@/components/auth-provider";
 import { Users, Loader2, CheckCircle, AlertCircle, ShieldQuestion, Upload } from "lucide-react";
+import QuizzesManager from "@/components/admin/QuizzesManager";
+// ✅ store (кэш) — ганц эх сурвалж
+import {
+  useStudentsStore,
+  type Student as StudentType,
+} from "@/store/students-store";
 
 /* ============================= Shared Types ============================= */
 
@@ -36,30 +42,6 @@ type FieldKey =
   | "externalId";
 
 const REQUIRED_FIELDS: FieldKey[] = ["firstName", "lastName", "email"];
-
-type StudentMappedRow = {
-  firstName: string;
-  lastName: string;
-  email: string;
-  grade?: string;
-  class?: string;
-  parentEmail1?: string;
-  parentEmail2?: string;
-  externalId?: string;
-};
-
-type Student = {
-  id: string;
-  firstName?: string;
-  lastName?: string;
-  email: string;
-  grade?: string;
-  class?: string;
-  parentEmail1?: string;
-  parentEmail2?: string;
-  externalId?: string;
-  role?: string;
-};
 
 /* ============================== Small UI ============================== */
 
@@ -341,7 +323,7 @@ function UsersManagement() {
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {ROLES.map((role) => (
+                {["student", "parent", "teacher", "admin"].map((role) => (
                   <button
                     key={role}
                     onClick={() => handleRoleChange(u, role)}
@@ -388,8 +370,20 @@ function UsersManagement() {
 
 /* ==================== 2) Student Import w/ Mapping ==================== */
 
+type StudentMappedRow = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  grade?: string;
+  class?: string;
+  parentEmail1?: string;
+  parentEmail2?: string;
+  externalId?: string;
+};
+
 function StudentImportWithMapping() {
   const { user } = useAuth();
+  const { clear } = useStudentsStore();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [file, setFile] = useState<File | null>(null);
@@ -477,6 +471,10 @@ function StudentImportWithMapping() {
       if (!res.ok) throw new Error(data.error || "Импортын алдаа");
       setResults(data.results);
       setStep(3);
+
+      // ✅ Импортын дараа store-г цэвэрлээд "refresh" дохио дамжуулна
+      clear();
+      window.dispatchEvent(new CustomEvent("students:refresh"));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Тодорхойгүй алдаа";
       alert(msg);
@@ -609,13 +607,19 @@ function StudentImportWithMapping() {
   );
 }
 
-/* ==================== 3) Students List + Delete (sortable columns) ==================== */
-
 /* ==================== 3) Students List + Delete (sortable + pagination) ==================== */
 
 function StudentListManager() {
   const { user } = useAuth();
-  const [students, setStudents] = useState<Student[]>([]);
+
+  // ✅ store-с
+  const {
+    students,
+    setStudents,
+    removeByIds,
+    lastFetchedAt,
+  } = useStudentsStore();
+
   const [loading, setLoading] = useState<boolean>(true);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -641,29 +645,55 @@ function StudentListManager() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(20);
 
-  const fetchStudents = useCallback(async (): Promise<void> => {
-    if (!user) return;
-    setLoading(true);
-    setErr(null);
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch("/api/admin/students", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = (await res.json()) as { students?: Student[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "Жагсаалт татаж чадсангүй.");
-      setStudents(Array.isArray(data.students) ? data.students : []);
-      setSelected(new Set());
-      setPage(1); // шинэчилсний дараа 1-р хуудаснаас
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
+  // ✅ Cache TTL: 5 минут
+  const CACHE_TTL_MS = 1440 * 60 * 1000;
+  const isCacheFresh = !!lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS;
+
+  const fetchStudents = useCallback(
+    async (force = false): Promise<void> => {
+      if (!user) return;
+
+      // кэш шинэхэн байвал сервер дуудахгүй
+      if (!force && isCacheFresh) {
+        setLoading(false);
+        setErr(null);
+        return;
+      }
+
+      setLoading(true);
+      setErr(null);
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch("/api/admin/students", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = (await res.json()) as { students?: StudentType[]; error?: string };
+        if (!res.ok) throw new Error(data.error || "Жагсаалт татаж чадсангүй.");
+
+        const list = Array.isArray(data.students) ? data.students : [];
+        // ✅ store-д хадгална (lastFetchedAt update)
+        setStudents(list, Date.now());
+
+        setSelected(new Set());
+        setPage(1);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user, isCacheFresh, setStudents]
+  );
 
   useEffect(() => {
-    void fetchStudents();
+    void fetchStudents(false);
+  }, [fetchStudents]);
+
+  // ✅ импортын дараах refresh эвент
+  useEffect(() => {
+    const onRefresh = () => void fetchStudents(true);
+    window.addEventListener("students:refresh", onRefresh as EventListener);
+    return () => window.removeEventListener("students:refresh", onRefresh as EventListener);
   }, [fetchStudents]);
 
   // ✅ sorting helpers
@@ -676,11 +706,11 @@ function StudentListManager() {
       const av =
         sortKey === "externalId"
           ? (a.externalId || a.id)
-          : (a[sortKey as keyof Student] as string | undefined);
+          : ((a as any)[sortKey] as string | undefined);
       const bv =
         sortKey === "externalId"
           ? (b.externalId || b.id)
-          : (b[sortKey as keyof Student] as string | undefined);
+          : ((b as any)[sortKey] as string | undefined);
 
       const A = norm(av);
       const B = norm(bv);
@@ -729,10 +759,8 @@ function StudentListManager() {
     setSelected((prev) => {
       const next = new Set(prev);
       if (isAllSelected) {
-        // одоогийн хуудсан дахь бүх мөрийг сонголтоос авах
         visible.forEach((s) => next.delete(s.id));
       } else {
-        // одоогийн хуудсан дахь бүх мөрийг сонгох
         visible.forEach((s) => next.add(s.id));
       }
       return next;
@@ -754,7 +782,10 @@ function StudentListManager() {
       });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !data.ok) throw new Error(data.error || "Устгал амжилтгүй.");
-      setStudents((list) => list.filter((s) => s.id !== id));
+
+      // ✅ store-с даруй авч хаяна
+      removeByIds([id]);
+
       setSelected((sel) => {
         const next = new Set(sel);
         next.delete(id);
@@ -785,7 +816,9 @@ function StudentListManager() {
       });
       const data = (await res.json()) as { deleted?: number; error?: string };
       if (!res.ok) throw new Error(data.error || "Бөөн устгал амжилтгүй.");
-      setStudents((list) => list.filter((s) => !selected.has(s.id)));
+
+      // ✅ store-с сонгосныг авч хаяна
+      removeByIds(ids);
       setSelected(new Set());
     } catch (e) {
       alert(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
@@ -840,6 +873,12 @@ function StudentListManager() {
             </span>
           </div>
 
+          {isCacheFresh && (
+            <span className="text-xs px-2 py-1 rounded-md border border-stroke bg-card2 text-muted" title="Кэшнээс харж байна">
+              Кэш
+            </span>
+          )}
+
           <select
             value={pageSize}
             onChange={(e) => setPageSize(Number(e.target.value))}
@@ -874,8 +913,9 @@ function StudentListManager() {
           </div>
 
           <button
-            onClick={() => void fetchStudents()}
+            onClick={() => void fetchStudents(true)}
             className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm font-bold"
+            title="Серверээс хүчээр шинэчлэх"
           >
             Дахин ачаалах
           </button>
@@ -997,7 +1037,7 @@ function StudentListManager() {
 /* ======================== 4) Page with Tabs ======================== */
 
 function AdminDashboardTabs() {
-  const [activeTab, setActiveTab] = useState<"users" | "import" | "students">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "import" | "students" | "results" | "quizzes">("users");
 
   return (
     <div className="card border border-stroke bg-card p-6 rounded-2xl">
@@ -1017,17 +1057,34 @@ function AdminDashboardTabs() {
         </button>
         <button
           onClick={() => setActiveTab("students")}
-          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "students" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
+          className={`px-4 py-2 font-bold text см rounded-t-lg ${activeTab === "students" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
         >
           Сурагчдын жагсаалт
         </button>
-        
+        <button
+          onClick={() => setActiveTab("results")}
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "results" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
+        >
+          Сурагчийн дүн
+        </button>
+        <button
+          onClick={() => setActiveTab("quizzes")}
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${
+            activeTab === "quizzes"
+              ? "bg-primary-bg text-primary-text"
+              : "bg-card2 text-muted hover:text-text"
+          }`}
+        >
+          Шалгалтууд
+        </button>
       </div>
 
       {/* Tab Content */}
       {activeTab === "users" && <UsersManagement />}
       {activeTab === "import" && <StudentImportWithMapping />}
       {activeTab === "students" && <StudentListManager />}
+      {activeTab === "results" && <StudentResultsTab />}
+      {activeTab === "quizzes" && <QuizzesManager />}
     </div>
   );
 }

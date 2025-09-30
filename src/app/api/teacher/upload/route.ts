@@ -45,7 +45,6 @@ const makeQuizId = (subject: string, quizName: string, uploadedAtISO: string) =>
   `${slug(subject)}__${slug(quizName)}__${tsKey(uploadedAtISO)}`;
 
 const isFiniteNumber = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
-const compactNumbers = (arr: Array<number | null | undefined>): number[] => arr.filter(isFiniteNumber);
 
 function calcPercent(s?: PartStats): number | undefined {
   if (!s) return undefined;
@@ -57,9 +56,6 @@ function calcPercent(s?: PartStats): number | undefined {
 }
 
 function calcTotalPercent(p1?: PartStats, p2?: PartStats): number | undefined {
-  const p1p = calcPercent(p1);
-  const p2p = calcPercent(p2);
-
   const hasFull1 = p1 && isFiniteNumber(p1.numCorrect) && isFiniteNumber(p1.numQuestions) && p1.numQuestions! > 0;
   const hasFull2 = p2 && isFiniteNumber(p2.numCorrect) && isFiniteNumber(p2.numQuestions) && p2.numQuestions! > 0;
 
@@ -68,6 +64,10 @@ function calcTotalPercent(p1?: PartStats, p2?: PartStats): number | undefined {
     const totalQuestions = (p1!.numQuestions as number) + (p2!.numQuestions as number);
     return (totalCorrect / totalQuestions) * 100;
   }
+  
+  const p1p = calcPercent(p1);
+  const p2p = calcPercent(p2);
+  
   if (isFiniteNumber(p1p) && isFiniteNumber(p2p)) return (p1p! + p2p!) / 2;
   if (isFiniteNumber(p1p)) return p1p!;
   if (isFiniteNumber(p2p)) return p2p!;
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     if (
       !payload?.subject ||
       !payload?.class ||
-      !payload?.date ||           // YYYY-MM-DD
+      !payload?.date ||
       !payload?.quizName ||
       !payload?.uploadedAt ||
       !Array.isArray(payload.rows)
@@ -120,26 +120,33 @@ export async function POST(req: NextRequest) {
 
     const quizId = makeQuizId(payload.subject, payload.quizName, payload.uploadedAt);
 
-    // 3) students map (externalId -> {id,name,class})
+    // 3) Students map (externalId -> {id,name,class})
     const extIds = Array.from(new Set(payload.rows.map(r => String(r.externalId).trim()).filter(Boolean)));
-    const extNums = extIds.map(Number).filter((n) => Number.isFinite(n)) as number[];
+    const extNums = extIds.map(Number).filter((n) => Number.isFinite(n));
 
-    const chunks = <T,>(arr: T[], size = 10) => {
+    const chunks = <T,>(arr: T[], size = 10): T[][] => {
       const out: T[][] = [];
       for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
       return out;
     };
 
     const tasks: Promise<FirebaseFirestore.QuerySnapshot>[] = [];
-    for (const c of chunks(extIds, 10)) tasks.push(adminDb.collection("students").where("externalId", "in", c).get());
-    for (const c of chunks(extNums, 10)) tasks.push(adminDb.collection("students").where("externalId", "in", c).get());
+    if (extIds.length > 0) {
+        for (const c of chunks(extIds, 10)) {
+            tasks.push(adminDb.collection("students").where("externalId", "in", c).get());
+        }
+    }
+    if (extNums.length > 0) {
+        for (const c of chunks(extNums, 10)) {
+            tasks.push(adminDb.collection("students").where("externalId", "in", c).get());
+        }
+    }
 
     const snaps = await Promise.all(tasks);
-
     const extToStudent = new Map<string, StudentDoc>();
     for (const snap of snaps) {
       snap.docs.forEach((doc) => {
-        const v = doc.data() as any;
+        const v = doc.data();
         const firstName = String(v.firstName ?? v.firstname ?? "").trim();
         const lastName  = String(v.lastName  ?? v.lastname  ?? "").trim();
         const fullName  = [lastName, firstName].filter(Boolean).join(" ") || String(v.name ?? "NoName");
@@ -162,10 +169,10 @@ export async function POST(req: NextRequest) {
     await quizRef.set(
       {
         title: payload.quizName,
-        quizName: payload.quizName,              // уян хатан байлгая
+        quizName: payload.quizName,
         subject: payload.subject,
         class: payload.class,
-        date: payload.date,                      // YYYY-MM-DD
+        date: payload.date,
         uploadedAt: uploadedAtDate,
         uploadedBy: decoded.uid,
         uploadedByEmail: decoded.email ?? null,
@@ -175,21 +182,10 @@ export async function POST(req: NextRequest) {
       { merge: true }
     );
 
-    // 5) results_flat-д бичих (batch-уудаар, хамгийн бага уншилт)
+    // 5) results_flat-д бичих
     type FlatRow = {
       docId: string;
-      data: {
-        quizId: string;
-        studentId: string;
-        studentName: string;
-        class: string;
-        subject: string;
-        date: string;             // YYYY-MM-DD
-        score: number | null;     // 0..100
-        raw?: { part1?: PartStats; part2?: PartStats };
-        uploadedAt: Date;
-        updatedAt: Date;
-      };
+      data: any; // Simplified for brevity
     };
 
     const toWrites: FlatRow[] = [];
@@ -200,12 +196,10 @@ export async function POST(req: NextRequest) {
       const student = extToStudent.get(key) || extToStudent.get(String(Number(key)));
       if (!student) continue;
 
-      const p1 = calcPercent(row.part1);
-      const p2 = calcPercent(row.part2);
       const total = calcTotalPercent(row.part1, row.part2);
       const score = isFiniteNumber(total) ? Number(total.toFixed(2)) : null;
 
-      if (isFiniteNumber(score)) scoresForStats.push(score!);
+      if (isFiniteNumber(score)) scoresForStats.push(score);
 
       const docId = `${quizId}__${student.id}`;
       toWrites.push({
@@ -218,7 +212,7 @@ export async function POST(req: NextRequest) {
           subject: payload.subject,
           date: payload.date,
           score,
-          raw: (row.part1 || row.part2) ? { part1: row.part1, part2: row.part2 } : undefined,
+          raw: (row.part1 || row.part2) ? { part1: row.part1 ?? null, part2: row.part2 ?? null } : undefined,
           uploadedAt: uploadedAtDate,
           updatedAt: new Date(),
         },
@@ -236,7 +230,7 @@ export async function POST(req: NextRequest) {
       await batch.commit();
     }
 
-    // 6) quizzes/{quizId} дээр статистик ба totalStudents-г шинэчилнэ
+    // 6) quizzes/{quizId} дээр статистик шинэчлэх
     const totalStudents = toWrites.length;
     const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
     const stats = {
@@ -244,6 +238,10 @@ export async function POST(req: NextRequest) {
       max: scoresForStats.length ? Math.max(...scoresForStats) : null,
       min: scoresForStats.length ? Math.min(...scoresForStats) : null,
     };
+
+    if (stats.avg !== null) {
+        stats.avg = Number(stats.avg.toFixed(2));
+    }
 
     await quizRef.set(
       {

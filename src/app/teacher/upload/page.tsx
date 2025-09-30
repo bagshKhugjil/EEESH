@@ -24,15 +24,17 @@ const SUBJECTS = [
 type Subject = (typeof SUBJECTS)[number];
 
 type RawRow = {
-  "Quiz Name"?: string;
-  Class?: string;
-  "ZipGrade ID"?: string | number;
-  "External Id"?: string | number;
-  "First Name"?: string;
-  "Last Name"?: string;
-  "Num Questions"?: string | number;
-  "Num Correct"?: string | number;
-  "Percent Correct"?: string | number;
+  "Quiz Name"?: string | null;
+  Class?: string | null;
+  "ZipGrade ID"?: string | number | null;
+  "External Id"?: string | number | null;
+  "First Name"?: string | null;
+  "Last Name"?: string | null;
+  "Num Questions"?: string | number | null;
+  "Num Correct"?: string | number | null;
+  "Percent Correct"?: string | number | null;
+  // Q1, Q2 гэх мэт динамик багануудыг зөвшөөрөх index signature
+  [key: string]: string | number | null | undefined;
 };
 
 type ParsedRow = {
@@ -170,31 +172,69 @@ export default function TeacherUploadPage() {
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: "" });
+    const rows = XLSX.utils.sheet_to_json<RawRow>(sheet, { defval: null });
+
+    if (!rows || rows.length === 0) {
+      return []; // Хоосон файл бол шууд буцаана
+    }
+
+    // --- АЛХАМ 1: Шалгалтын тохиргоог бэлтгэх ---
+
+    // Файлаас бүх асуултын баганыг (Q1, Q2, ...) автоматаар олох
+    const questionCols = Object.keys(rows[0] || {}).filter(
+      (key) => key.startsWith("Q") && !isNaN(parseInt(key.substring(1)))
+    );
+
+    if (questionCols.length === 0) {
+        throw new Error("Файлаас асуултын багана (Q1, Q2, ...) олсонгүй. Файлын бүтцээ шалгана уу.");
+    }
+
+    // Эхний сурагчийн мэдээлэл дээр тулгуурлан нийт оноог тооцоолох
+    const firstRow = rows[0];
+    const firstStudentPercentRaw = firstRow["Percent Correct"];
+    const firstStudentPercent = Number(String(firstStudentPercentRaw ?? "0").replace("%", ""));
+
+    if (!Number.isFinite(firstStudentPercent) || firstStudentPercent <= 0) {
+      throw new Error(
+        "Эхний сурагчийн 'Percent Correct' баганын утга буруу эсвэл 0 байна. Нийт оноог тооцоолох боломжгүй."
+      );
+    }
+
+    const firstStudentRawScore = questionCols.reduce((sum, col) => {
+      const value = Number(firstRow[col]);
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+
+    // Шалгалтын нийт авах боломжтой дээд оноо (энэ нь numQuestions болно)
+    const maxPossibleScore = Math.round((firstStudentRawScore / firstStudentPercent) * 100);
+
+    // --- АЛХАМ 2: Сурагч бүрийн мэдээллийг тооцоолох ---
 
     const parsed: ParsedRow[] = rows.map((r) => {
+      // Сурагчийн хувийн мэдээллийг авах
       const ext = String(r["External Id"] ?? "").trim();
       const cls = String(r["Class"] ?? "").trim();
       const fn = String(r["First Name"] ?? "").trim();
       const ln = String(r["Last Name"] ?? "").trim();
 
-      const nqRaw = r["Num Questions"];
-      const ncRaw = r["Num Correct"];
-      const pcRaw = r["Percent Correct"];
+      // Сурагч бүрийн авсан түүхий оноог тооцоолох (энэ нь numCorrect болно)
+      const studentRawScore = questionCols.reduce((sum, col) => {
+        const value = Number(r[col]);
+        return sum + (Number.isFinite(value) ? value : 0);
+      }, 0);
 
-      const nqNum = nqRaw === "" || nqRaw === undefined ? null : Number(nqRaw);
-      const ncNum = ncRaw === "" || ncRaw === undefined ? null : Number(ncRaw);
-      const pcNum =
-        pcRaw === "" || pcRaw === undefined ? null : Number(String(pcRaw).replace("%", ""));
+      // Сурагчийн гүйцэтгэлийн хувийг шинээр тооцоолох
+      const newPercent = maxPossibleScore > 0 ? (studentRawScore / maxPossibleScore) * 100 : 0;
 
+      // Үр дүнг буцаах
       return {
         externalId: ext,
         className: cls,
         firstName: fn,
         lastName: ln,
-        numQuestions: Number.isFinite(nqNum as number) ? (nqNum as number) : null,
-        numCorrect: Number.isFinite(ncNum as number) ? (ncNum as number) : null,
-        percentCorrect: Number.isFinite(pcNum as number) ? (pcNum as number) : null,
+        numQuestions: maxPossibleScore,
+        numCorrect: studentRawScore,
+        percentCorrect: Number(newPercent.toFixed(2)),
       };
     });
 
