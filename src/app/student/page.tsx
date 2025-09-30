@@ -135,6 +135,7 @@ export default function StudentOnlyPage() {
   const chartHeight = useChartHeight();
 
   // 0) зөвшөөрөгдсөн сурагчийн id авах
+ // 0) зөвшөөрөгдсөн сурагчийн id авах
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -156,6 +157,8 @@ export default function StudentOnlyPage() {
         if (!cancelled) {
           setErr(e instanceof Error ? e.message : "ACCESS_ERROR");
           setAccessChecked(true);
+          setLoadingStudent(false); // <<< НЭМЭГДСЭН МӨР
+          setLoadingResults(false); // <<< НЭМЭГДСЭН МӨР
         }
       }
     })();

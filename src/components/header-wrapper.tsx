@@ -4,7 +4,6 @@ import { usePathname } from "next/navigation";
 import { Header } from "./header";
 
 const HIDE_EXACT = new Set([
-  "/",
   "/teacher/upload",
   "/teacher/files",
   "/teacher/results",
