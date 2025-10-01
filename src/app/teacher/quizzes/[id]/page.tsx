@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
-import { getCache, setCache, delCache } from "@/lib/cache";
+import { getCache, setCache } from "@/lib/cache";
 
 type QuizMeta = {
   id: string;
@@ -21,14 +21,14 @@ type QuizMeta = {
 };
 
 type ResultItem = {
-  id: string;           // results_flat doc id
+  id: string; // results_flat doc id
   studentId: string;
   studentName: string;
   class: string;
   subject: string;
   date: string;
   score: number | null;
-  raw?: any;
+  raw?: any; // Энэ хэсгийг таны анхны кодонд байсан тул хэвээр үлдээв.
 };
 
 const CACHE_TTL = 60_000; // 1 мин — метадатыг богино кэшлэнэ
@@ -49,6 +49,13 @@ export default function QuizDetailPage(props: { params: Promise<{ id: string }> 
 
   const [q, setQ] = useState("");
   const firstLoadRef = useRef(true);
+
+  // --- ЭРЭМБЭЛЭХ ЛОГИК ЭНД НЭМЭГДЭВ ---
+  const [sortConfig, setSortConfig] = useState<{
+    key: keyof ResultItem | null;
+    direction: "ascending" | "descending";
+  }>({ key: null, direction: "ascending" });
+  // --- ЭРЭМБЭЛЭХ ЛОГИК ЭНД НЭМЭГДЭВ ---
 
   // resolve params (Next 15: params is Promise)
   useEffect(() => {
@@ -154,11 +161,48 @@ export default function QuizDetailPage(props: { params: Promise<{ id: string }> 
     );
   }, [items, q]);
 
+  // --- ЭРЭМБЭЛЭХ ЛОГИК ЭНД НЭМЭГДЭВ ---
+  const sortedAndFilteredItems = useMemo(() => {
+    let sortableItems = [...filtered];
+    if (sortConfig.key !== null) {
+      sortableItems.sort((a, b) => {
+        const aValue = a[sortConfig.key!];
+        const bValue = b[sortConfig.key!];
+
+        if (aValue === null || aValue === undefined) return 1;
+        if (bValue === null || bValue === undefined) return -1;
+
+        if (aValue < bValue) {
+          return sortConfig.direction === "ascending" ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === "ascending" ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [filtered, sortConfig]);
+
+  const requestSort = (key: keyof ResultItem) => {
+    let direction: "ascending" | "descending" = "ascending";
+    if (sortConfig.key === key && sortConfig.direction === "ascending") {
+      direction = "descending";
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortDirectionIcon = (name: keyof ResultItem) => {
+    if (sortConfig.key !== name) return null;
+    return sortConfig.direction === "ascending" ? " ▲" : " ▼";
+  };
+  // --- ЭРЭМБЭЛЭХ ЛОГИК ЭНД НЭМЭГДЭВ ---
+
   const fmtDate = (iso?: string) => {
     if (!iso) return "—";
     const d = new Date(iso);
     return isNaN(+d) ? "—" : d.toLocaleString();
-    };
+  };
 
   return (
     <div className="min-h-dvh" style={{ background: "var(--bg)", color: "var(--text)" }}>
@@ -235,31 +279,12 @@ export default function QuizDetailPage(props: { params: Promise<{ id: string }> 
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Сурагчийн нэр/анги/ID-гаар хайх…"
+            placeholder="Сурагчийн нэр, ангиар хайх…"
             className="w-full rounded-md px-3 py-2 text-sm sm:text-base"
             style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
           />
           <div className="flex gap-2">
-            <button
-              className="rounded-md px-3 py-2 text-sm font-bold"
-              style={{ background: "var(--bg)", border: "1px solid var(--stroke)", color: "var(--text)" }}
-              onClick={() => { delCache(metaCacheKey(quizId)); if (user) { /* refetch meta */ (async () => {
-                try {
-                  setLoadingMeta(true);
-                  const token = await user.getIdToken();
-                  const res = await fetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                  });
-                  const data = await res.json();
-                  if (data?.ok && data.quiz) {
-                    setMeta(data.quiz);
-                    setCache(metaCacheKey(quizId), data.quiz, CACHE_TTL, 1);
-                  }
-                } finally { setLoadingMeta(false); }
-              })(); } }}
-            >
-              Meta Refresh
-            </button>
+
             <Link
               href="/teacher/files"
               className="rounded-md px-3 py-2 text-sm font-bold"
@@ -273,14 +298,47 @@ export default function QuizDetailPage(props: { params: Promise<{ id: string }> 
         {/* Results table */}
         <div className="overflow-auto border border-[var(--stroke)] rounded-xl">
           <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b" style={{ background: "var(--card2)", borderColor: "var(--stroke)" }}>
-                <th className="px-3 py-2 text-left">Нэр</th>
-                <th className="px-3 py-2 text-left">Анги</th>
-                <th className="px-3 py-2 text-left">Огноо</th>
-                <th className="px-3 py-2 text-right">Оноо (0–100)</th>
-              </tr>
-            </thead>
+          <thead>
+  <tr className="border-b" style={{ background: "var(--card2)", borderColor: "var(--stroke)" }}>
+    {/* Padding-г th-ээс авч, товчлуур дээр байршуулснаар дарах талбай том болно */}
+    <th className="p-1 text-left">
+      <button
+        type="button"
+        onClick={() => requestSort("studentName")}
+        className="w-full px-3 py-2 rounded-md font-bold flex items-center gap-1 text-left transition-colors hover:bg-[var(--stroke)]"
+      >
+        Нэр{getSortDirectionIcon("studentName")}
+      </button>
+    </th>
+    <th className="p-1 text-left">
+      <button
+        type="button"
+        onClick={() => requestSort("class")}
+        className="w-full px-3 py-2 rounded-md font-bold flex items-center gap-1 text-left transition-colors hover:bg-[var(--stroke)]"
+      >
+        Анги{getSortDirectionIcon("class")}
+      </button>
+    </th>
+    <th className="p-1 text-left">
+      <button
+        type="button"
+        onClick={() => requestSort("date")}
+        className="w-full px-3 py-2 rounded-md font-bold flex items-center gap-1 text-left transition-colors hover:bg-[var(--stroke)]"
+      >
+        Огноо{getSortDirectionIcon("date")}
+      </button>
+    </th>
+    <th className="p-1 text-right">
+      <button
+        type="button"
+        onClick={() => requestSort("score")}
+        className="w-full px-3 py-2 rounded-md font-bold flex justify-end items-center gap-1 text-right transition-colors hover:bg-[var(--stroke)]"
+      >
+        Оноо (0–100){getSortDirectionIcon("score")}
+      </button>
+    </th>
+  </tr>
+</thead>
             <tbody>
               {loadingItems && items.length === 0 ? (
                 [...Array(6)].map((_, i) => (
@@ -296,14 +354,14 @@ export default function QuizDetailPage(props: { params: Promise<{ id: string }> 
                     {errItems}
                   </td>
                 </tr>
-              ) : filtered.length === 0 ? (
+              ) : sortedAndFilteredItems.length === 0 ? ( // Өөрчлөлт: filtered -> sortedAndFilteredItems
                 <tr>
                   <td className="px-3 py-4 text-center text-muted" colSpan={4}>
                     Дүн алга.
                   </td>
                 </tr>
               ) : (
-                filtered.map((r) => (
+                sortedAndFilteredItems.map((r) => ( // Өөрчлөлт: filtered -> sortedAndFilteredItems
                   <tr key={r.id} className="border-b" style={{ borderColor: "var(--stroke)" }}>
                     <td className="px-3 py-2">{r.studentName}</td>
                     <td className="px-3 py-2">{r.class}</td>
