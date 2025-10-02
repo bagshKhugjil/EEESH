@@ -153,7 +153,7 @@ function MappingSelect({
   );
 }
 
-/* ======================== 1) Users Management ======================== */
+/* ======================== 1) Users Management (ETag-тэй) ======================== */
 
 function UsersManagement() {
   const { user } = useAuth();
@@ -161,14 +161,22 @@ function UsersManagement() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [toast, setToast] = useState<{ show: boolean; message: string; type: "success" | "error" }>({ show: false, message: "", type: "success" });
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: "success" | "error" }>({
+    show: false, message: "", type: "success"
+  });
 
-  const [modalState, setModalState] = useState<ModalState>({ isOpen: false, userToUpdate: null, newRole: null });
+  const [modalState, setModalState] = useState<ModalState>({
+    isOpen: false, userToUpdate: null, newRole: null
+  });
   const [isChangingRole, setIsChangingRole] = useState<boolean>(false);
 
   // 🔎 Хайх + шүүлтүүр
   const [query, setQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "teacher" | "student" | "parent" | "unknown">("all");
+  const [roleFilter, setRoleFilter] =
+    useState<"all" | "admin" | "teacher" | "student" | "parent" | "unknown">("all");
+
+  // ✅ ETag — ЗӨВХӨН component-level кэш ( давхар кэшлэхгүй )
+  const usersETagRef = useRef<string | null>(null);
 
   const showToast = (message: string, type: "success" | "error"): void => {
     setToast({ show: true, message, type });
@@ -181,7 +189,22 @@ function UsersManagement() {
     setError(null);
     try {
       const token = await user.getIdToken();
-      const response = await fetch("/api/admin/users", { headers: { Authorization: `Bearer ${token}` } });
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      if (usersETagRef.current) headers["If-None-Match"] = usersETagRef.current;
+
+      const response = await fetch("/api/admin/users?pageSize=1000", { headers });
+
+      if (response.status === 304) {
+        // Сервер: "өөрчлөгдөөгүй" → өмнөх state-ээ хадгална
+        setLoading(false);
+        return;
+      }
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({} as any));
+        throw new Error(err?.error || `HTTP_${response.status}`);
+      }
+
       const data = await response.json();
 
       // —— Аюулгүй задлалт: массив эсвэл { users: [...] } хэлбэртэйг дэмжинэ
@@ -194,6 +217,10 @@ function UsersManagement() {
         throw new Error(data.error || "Хэрэглэгчдийн мэдээллийг татахад алдаа гарлаа.");
       }
       setUsers(list);
+
+      // ✅ ETag хадгалах ( зөвхөн ref )
+      const etag = response.headers.get("ETag");
+      if (etag) usersETagRef.current = etag;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Тодорхойгүй алдаа гарлаа.");
       setUsers([]); // хамгаалалт
@@ -222,10 +249,11 @@ function UsersManagement() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ role: modalState.newRole }),
       });
-      const result = (await response.json()) as { message?: string; error?: string };
-      if (!response.ok) throw new Error(result.error || "Роль өөрчлөхөд алдаа гарлаа.");
+      const result = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
+      if (!response.ok) throw new Error(result?.error || "Роль өөрчлөхөд алдаа гарлаа.");
 
-      showToast(result.message || "Амжилттай", "success");
+      showToast(result?.message || "Амжилттай", "success");
+      // Роль солигдсон → сервер талын ETag өөрчлөгдсөн байж болно; дахин validate хийе
       await fetchUsers();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Тодорхойгүй алдаа гарлаа.", "error");
@@ -242,14 +270,10 @@ function UsersManagement() {
   const filteredUsers = useMemo(() => {
     const q = query.trim().toLowerCase();
     return safeUsers.filter((u) => {
-      // роль шүүлтүүр
       const r = (u.role ?? "unknown") as string;
       const roleOk = roleFilter === "all" ? true : r === roleFilter;
-
-      // хайлт: нэр/имэйл дээр
       const hay = `${u.displayName ?? ""} ${u.email ?? ""}`.toLowerCase();
       const searchOk = q ? hay.includes(q) : true;
-
       return roleOk && searchOk;
     });
   }, [safeUsers, query, roleFilter]);
@@ -317,7 +341,9 @@ function UsersManagement() {
                 <div>
                   <div className="flex items-center gap-2 mb-0.5">
                     <p className="font-bold text-text">{u.displayName || "Нэргүй"}</p>
-                    <span className={getRoleBadgeClasses(u.role)}>{u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1) : "Тодорхойгүй"}</span>
+                    <span className={getRoleBadgeClasses(u.role)}>
+                      {u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1) : "Тодорхойгүй"}
+                    </span>
                   </div>
                   <p className="text-xs text-muted">{u.email}</p>
                 </div>
@@ -357,7 +383,9 @@ function UsersManagement() {
       {toast.show && (
         <div
           className={`fixed bottom-5 right-5 flex items-center gap-3 p-4 rounded-lg border text-sm font-bold animate-fade-in-up ${
-            toast.type === "success" ? "bg-green-500/10 border-green-500/20 text-green-400" : "bg-red-500/10 border-red-500/20 text-red-400"
+            toast.type === "success"
+              ? "bg-green-500/10 border-green-500/20 text-green-400"
+              : "bg-red-500/10 border-red-500/20 text-red-400"
           }`}
         >
           {toast.type === "success" ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
@@ -607,7 +635,7 @@ function StudentImportWithMapping() {
   );
 }
 
-/* ==================== 3) Students List + Delete (sortable + pagination) ==================== */
+/* ==================== 3) Students List + Delete (sortable + pagination, ETag-тэй) ==================== */
 
 function StudentListManager() {
   const { user } = useAuth();
@@ -624,6 +652,9 @@ function StudentListManager() {
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+
+  // ✅ ETag — санах ойд хадгална (ref + sessionStorage)
+  const studentsETagRef = useRef<string | null>(null);
 
   // ✅ sort state
   type SortKey =
@@ -645,7 +676,7 @@ function StudentListManager() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(20);
 
-  // ✅ Cache TTL: 5 минут
+  // ✅ Cache TTL (store-д): 24 цаг
   const CACHE_TTL_MS = 1440 * 60 * 1000;
   const isCacheFresh = !!lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS;
 
@@ -653,7 +684,7 @@ function StudentListManager() {
     async (force = false): Promise<void> => {
       if (!user) return;
 
-      // кэш шинэхэн байвал сервер дуудахгүй
+      // store кэш шинэхэн, ETag мэдэгдэхгүй бол сервер дуудахгүй
       if (!force && isCacheFresh) {
         setLoading(false);
         setErr(null);
@@ -664,9 +695,24 @@ function StudentListManager() {
       setErr(null);
       try {
         const token = await user.getIdToken();
-        const res = await fetch("/api/admin/students", {
-          headers: { Authorization: `Bearer ${token}` },
+
+        const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+        const storedEtag =
+          studentsETagRef.current ??
+          (typeof window !== "undefined" ? sessionStorage.getItem("ETAG_/api/admin/students") : null);
+        if (storedEtag) headers["If-None-Match"] = storedEtag;
+
+        const res = await fetch("/api/admin/students?pageSize=200", {
+          headers,
         });
+
+        if (res.status === 304) {
+          // өөрчлөлтгүй — store дахь өгөгдлөө үргэлжлүүлэн ашиглана
+          setLoading(false);
+          setErr(null);
+          return;
+        }
+
         const data = (await res.json()) as { students?: StudentType[]; error?: string };
         if (!res.ok) throw new Error(data.error || "Жагсаалт татаж чадсангүй.");
 
@@ -675,7 +721,13 @@ function StudentListManager() {
         setStudents(list, Date.now());
 
         setSelected(new Set());
-        setPage(1);
+
+        // ✅ шинэ ETag хадгална
+        const etag = res.headers.get("ETag");
+        if (etag) {
+          studentsETagRef.current = etag;
+          if (typeof window !== "undefined") sessionStorage.setItem("ETAG_/api/admin/students", etag);
+        }
       } catch (e) {
         setErr(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
       } finally {
