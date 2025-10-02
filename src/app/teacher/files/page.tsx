@@ -21,10 +21,9 @@ type Subject = (typeof SUBJECTS)[number];
 
 type QuizItem = {
   id: string;
-  quizId: string;
   quizName: string;
   subject: string;
-  uploadedAt: string;                 // ISO
+  uploadedAt: string;
   uploadedByEmail: string | null;
   sourceFiles?: { part1?: string; part2?: string };
 };
@@ -36,12 +35,30 @@ type ModalState = {
   onConfirm?: () => void;
 };
 
+// --- ETag-тай кешлэхэд зориулсан төрөл ба функцууд ---
+type CachedFiles = {
+  etag: string;
+  data: QuizItem[];
+};
+
+const filesCacheKey = (subject: Subject | "") => subject ? `files_cache_${subject}_v1` : null;
+
+function safeJsonParse<T>(str: string | null): T | null {
+  if (!str) return null;
+  try {
+    return JSON.parse(str) as T;
+  } catch (e) {
+    console.error("LocalStorage-с JSON уншихад алдаа гарлаа:", e);
+    return null;
+  }
+}
+
 export default function TeacherFilesPage() {
   const { user } = useAuth();
 
   const [subject, setSubject] = useState<Subject | "">("");
   const [items, setItems] = useState<QuizItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
@@ -87,14 +104,38 @@ export default function TeacherFilesPage() {
     setSubject(s);
     setLoading(true);
     setErr(null);
+
+    const cacheKey = filesCacheKey(s);
     try {
       const token = await user.getIdToken();
-      const res = await fetch(`/api/teacher/files?subject=${encodeURIComponent(s)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data: { ok: boolean; items?: QuizItem[]; error?: string; detail?: string } = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.detail || data.error || "Алдаа гарлаа");
-      setItems(Array.isArray(data.items) ? data.items : []);
+      const cached = cacheKey ? safeJsonParse<CachedFiles>(localStorage.getItem(cacheKey)) : null;
+
+      const headers: HeadersInit = { Authorization: `Bearer ${token}` };
+      if (cached?.etag) {
+        headers["If-None-Match"] = cached.etag;
+      }
+
+      const res = await fetch(`/api/teacher/files?subject=${encodeURIComponent(s)}`, { headers });
+
+      if (res.status === 304) {
+        if(cached?.data) setItems(cached.data);
+        return;
+      }
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: "Серверийн хариуг уншиж чадсангүй" }));
+        throw new Error(errData.detail || errData.error || "Алдаа гарлаа");
+      }
+      
+      const data: { ok: boolean; items?: QuizItem[] } = await res.json();
+      const newItems = Array.isArray(data.items) ? data.items : [];
+      const newETag = res.headers.get("etag");
+      
+      setItems(newItems);
+
+      if (newETag && cacheKey) {
+        localStorage.setItem(cacheKey, JSON.stringify({ etag: newETag, data: newItems }));
+      }
     } catch (e) {
       setItems([]);
       setErr(e instanceof Error ? e.message : "Алдаа гарлаа");
@@ -115,19 +156,33 @@ export default function TeacherFilesPage() {
       });
       const data: { ok?: boolean; error?: string } = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Устгал амжилтгүй.");
+      
       setItems((prev) => prev.filter((x) => x.id !== quiz.id));
+      
+      const cacheKey = filesCacheKey(subject);
+      if (cacheKey) {
+        localStorage.removeItem(cacheKey);
+      }
     } catch (e) {
       alert(e instanceof Error ? e.message : "Алдаа гарлаа");
     }
   };
 
-  // Сонгогдоогүй үед анхны subject-г автоматаар сонгоё (optional)
   useEffect(() => {
-    if (!subject && SUBJECTS.length) {
-      fetchFiles(SUBJECTS[0]);
+    if (user && !subject && SUBJECTS.length) {
+      const firstSubject = SUBJECTS[0];
+      
+      const cacheKey = filesCacheKey(firstSubject);
+      const cached = cacheKey ? safeJsonParse<CachedFiles>(localStorage.getItem(cacheKey)) : null;
+      if (cached) {
+        setSubject(firstSubject);
+        setItems(cached.data);
+      }
+      
+      fetchFiles(firstSubject);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subject]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, subject]);
 
   const fmtDateTime = (iso?: string) => {
     if (!iso) return "—";
@@ -138,7 +193,6 @@ export default function TeacherFilesPage() {
 
   return (
     <div className="min-h-dvh" style={{ background: "var(--bg)", color: "var(--text)" }}>
-      {/* Theme toggle */}
       <div className="fixed top-3 right-3 z-[999]">
         <button
           onClick={toggleTheme}
@@ -151,22 +205,14 @@ export default function TeacherFilesPage() {
         </button>
       </div>
 
-      {/* Top nav */}
       <div className="pt-4 text-center">
         <div className="inline-flex gap-2 p-2 rounded-xl" style={{ background: "var(--card)", border: "1px solid var(--stroke)" }}>
-          <Link href="/teacher" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
-            Нүүр
-          </Link>
-          <Link href="/teacher/upload" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>
-            Дүн оруулах
-          </Link>
-          <Link href="/teacher/files" className="px-4 py-2 rounded-md font-bold" style={{ background: "var(--card2)", color: "var(--text)" }}>
-            Файл удирдах
-          </Link>
+          <Link href="/teacher" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>Нүүр</Link>
+          <Link href="/teacher/upload" className="px-4 py-2 rounded-md font-bold transition-colors" style={{ color: "var(--muted)" }}>Дүн оруулах</Link>
+          <Link href="/teacher/files" className="px-4 py-2 rounded-md font-bold" style={{ background: "var(--card2)", color: "var(--text)" }}>Файл удирдах</Link>
         </div>
       </div>
 
-      {/* Sticky subject/search bar */}
       <div
         className="sticky top-0 z-40 mt-3 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--card)/0.7] bg-[var(--card)] border-b"
         style={{ borderColor: "var(--stroke)" }}
@@ -174,7 +220,6 @@ export default function TeacherFilesPage() {
         <div className="max-w-[1000px] mx-auto">
           <label className="block mb-2 font-bold text-sm sm:text-base">Хичээлээ сонго</label>
 
-          {/* Responsive subject grid */}
           <div className="grid gap-2 sm:gap-3 mb-3 sm:mb-4 grid-cols-3 xs:grid-cols-4 md:grid-cols-5">
             {SUBJECTS.map((s) => {
               const selected = subject === s;
@@ -196,7 +241,6 @@ export default function TeacherFilesPage() {
             })}
           </div>
 
-          {/* client-side search */}
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -208,8 +252,7 @@ export default function TeacherFilesPage() {
       </div>
 
       <div className="max-w-[1000px] mx-auto px-4 py-5">
-        {/* States */}
-        {loading && (
+        {(loading && items.length === 0) && (
           <div className="space-y-2">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="h-14 rounded-xl animate-pulse" style={{ background: "var(--card)", border: "1px solid var(--stroke)" }} />
@@ -217,10 +260,8 @@ export default function TeacherFilesPage() {
           </div>
         )}
 
-        {!loading && err && (
-          <div className="text-center p-6" style={{ color: "#ff8b8b" }}>
-            {err}
-          </div>
+        {err && (
+          <div className="text-center p-6" style={{ color: "#ff8b8b" }}>{err}</div>
         )}
 
         {!loading && !err && subject && filtered.length === 0 && (
@@ -229,8 +270,7 @@ export default function TeacherFilesPage() {
           </div>
         )}
 
-        {/* Mobile cards — Файлын нэр + Үүсгэсэн + Огноо */}
-        {!loading && !err && filtered.length > 0 && (
+        {filtered.length > 0 && (
           <>
             <div className="md:hidden space-y-3">
               {filtered.map((f) => {
@@ -280,7 +320,6 @@ export default function TeacherFilesPage() {
               })}
             </div>
 
-            {/* Desktop table — Файлын нэр / Үүсгэсэн / Огноо / Үйлдэл */}
             <div className="hidden md:block overflow-auto border border-[var(--stroke)] rounded-xl">
               <table className="min-w-full text-sm">
                 <thead>
@@ -348,7 +387,6 @@ export default function TeacherFilesPage() {
         )}
       </div>
 
-      {/* Modal */}
       {modal.open && (
         <div
           className="fixed inset-0 z-[1000] flex items-center justify-center"
