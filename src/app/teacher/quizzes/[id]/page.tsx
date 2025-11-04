@@ -31,32 +31,6 @@ type ResultItem = {
   raw?: object;
 };
 
-// --- ETag-тай кешлэх өгөгдлийн төрлүүд ---
-type CachedQuizMeta = {
-  etag: string;
-  data: QuizMeta;
-};
-
-type CachedResultItems = {
-  etag: string;
-  data: ResultItem[];
-  nextCursor: string | null;
-};
-
-// --- Кеш түлхүүрүүд ---
-const metaCacheKey = (quizId: string) => `quiz_meta_etag_${quizId}_v1`;
-const resultsCacheKey = (quizId: string) => `quiz_results_etag_${quizId}_v1`;
-
-function safeJsonParse<T>(str: string | null): T | null {
-  if (!str) return null;
-  try {
-    return JSON.parse(str) as T;
-  } catch (e) {
-    console.error("LocalStorage-с JSON уншихад алдаа гарлаа:", e);
-    return null;
-  }
-}
-
 export default function QuizDetailPage(props: { params: { id: string } | Promise<{ id: string }> }) {
   const { user } = useAuth();
   
@@ -115,33 +89,10 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
     if (!user || !quizId) return;
     setLoadingMeta(true);
     setErrorMeta(null);
-
-    const cacheKey = metaCacheKey(quizId);
     try {
       const token = await user.getIdToken();
-      const cached = safeJsonParse<CachedQuizMeta>(localStorage.getItem(cacheKey));
-
       const headers: HeadersInit = { Authorization: `Bearer ${token}` };
-      if (cached?.etag) headers["If-None-Match"] = cached.etag;
-
       const res = await fetch(`/api/teacher/quizzes/${encodeURIComponent(quizId)}`, { headers });
-
-      if (res.status === 304) {
-        if (cached?.data) setMeta(cached.data);
-        return;
-      }
-
-      // ← НЭМЭЛТ: 404 ирвэл кешээ цэвэрлээд мессеж үзүүлнэ
-      if (res.status === 404) {
-        localStorage.removeItem(cacheKey);
-        localStorage.removeItem(resultsCacheKey(quizId));
-        setMeta(null);
-        setItems([]);        // хүснэгтийн мөрүүдийг хоосолно
-        setCursor(null);
-        setHasMore(false);
-        setErrorMeta("Энэ шалгалт устгагдсан эсвэл олдсонгүй.");
-        return;
-      }
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ error: "Серверийн хариуг уншиж чадсангүй" }));
@@ -151,10 +102,6 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
       const data: { ok: boolean; quiz: QuizMeta } = await res.json();
       const newETag = res.headers.get("etag");
       setMeta(data.quiz);
-
-      if (newETag) {
-        localStorage.setItem(cacheKey, JSON.stringify({ etag: newETag, data: data.quiz }));
-      }
     } catch (e) {
       setErrorMeta(e instanceof Error ? e.message : "Тодорхойгүй алдаа");
     } finally {
@@ -166,40 +113,14 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
     if (!user || !quizId) return;
     setLoadingItems(true);
     setErrItems(null);
-
-    const cacheKey = resultsCacheKey(quizId);
     try {
       const token = await user.getIdToken();
-      const cached = safeJsonParse<CachedResultItems>(localStorage.getItem(cacheKey));
-
       const url = new URL(`/api/teacher/quizzes/${encodeURIComponent(quizId)}/results`, window.location.origin);
       if (nextCursor) url.searchParams.set("cursor", nextCursor);
       url.searchParams.set("limit", "200");
 
       const headers: HeadersInit = { Authorization: `Bearer ${token}` };
-      if (!nextCursor && cached?.etag) {
-        headers["If-None-Match"] = cached.etag;
-      }
-
       const res = await fetch(url.toString(), { headers });
-
-      if (res.status === 304) {
-        if (cached?.data) {
-          setItems(cached.data);
-          setCursor(cached.nextCursor);
-          setHasMore(!!cached.nextCursor);
-        }
-        return;
-      }
-      // ⬇️ Энэ хэсгийг нэм
-if (res.status === 404) {
-  localStorage.removeItem(cacheKey);
-  setItems([]);
-  setCursor(null);
-  setHasMore(false);
-  setErrItems("Энэ шалгалтын дүн устгагдсан эсвэл олдсонгүй.");
-  return;
-}
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ error: "Серверийн хариуг уншиж чадсангүй" }));
@@ -215,13 +136,7 @@ if (res.status === 404) {
       setCursor(data.nextCursor);
       setHasMore(!!data.nextCursor);
 
-      if (newETag) {
-        localStorage.setItem(cacheKey, JSON.stringify({
-          etag: newETag,
-          data: newItems,
-          nextCursor: data.nextCursor,
-        }));
-      }
+    
     } catch (e) {
       setErrItems(e instanceof Error ? e.message : "Тодорхойгүй алдаа");
     } finally {
@@ -232,26 +147,6 @@ if (res.status === 404) {
   useEffect(() => {
     // ← НЭМЭЛТ: user, quizId байж байж ажиллуулна
     if (!user || !quizId) return;
-
-    // эхлээд энэ id-гийн кешийг түр харуулна
-    const cachedMeta = safeJsonParse<CachedQuizMeta>(localStorage.getItem(metaCacheKey(quizId)));
-    if (cachedMeta) {
-      setMeta(cachedMeta.data);
-    } else {
-      setMeta(null); // хуучин шалгалт үлдэхээс сэргийлнэ
-    }
-
-    const cachedResults = safeJsonParse<CachedResultItems>(localStorage.getItem(resultsCacheKey(quizId)));
-    if (cachedResults) {
-      setItems(cachedResults.data);
-      setCursor(cachedResults.nextCursor);
-      setHasMore(!!cachedResults.nextCursor);
-    } else {
-      setItems([]);
-      setCursor(null);
-      setHasMore(true);
-    }
-
     // дараа нь серверээс шинэчилж авна
     fetchMetaWithETag();
     loadResultsWithETag(null);

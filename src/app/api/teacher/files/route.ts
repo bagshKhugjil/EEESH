@@ -2,7 +2,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/adminApp";
 import { DecodedIdToken } from "firebase-admin/auth";
-import { createHash } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +11,6 @@ interface DecodedWithRole extends DecodedIdToken {
   role?: string | null;
 }
 
-// Firestore-оос ирэх өгөгдлийн бүтцийг тодорхойлов
 type QuizDocumentData = {
   quizName?: string;
   title?: string;
@@ -32,18 +30,6 @@ type QuizRow = {
   uploadedAt: string;
   uploadedByEmail: string | null;
 };
-
-/**
- * Файлын жагсаалтад зориулж ETag үүсгэнэ (индекс шаардахгүй).
- */
-async function generateETagForFilesList(baseQuery: FirebaseFirestore.Query): Promise<string> {
-  const countSnap = await baseQuery.count().get();
-  const count = countSnap.data().count;
-
-  const etagString = `files-count-${count}`;
-  const hash = createHash("md5").update(etagString).digest("hex");
-  return `"${hash}"`;
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -67,23 +53,12 @@ export async function GET(req: NextRequest) {
     const limitParam = Number(searchParams.get("limit") || 200);
     const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 500) : 200;
 
-    // ---- ETag Logic ----
-    // 1. Шүүлтүүртэй үндсэн query-г үүсгэнэ
+    // ---- Firestore query (NO ETag) ----
     let baseQuery: FirebaseFirestore.Query = adminDb.collection("quizzes");
     if (subject) {
       baseQuery = baseQuery.where("subject", "==", subject);
     }
-    
-    // 2. Одоогийн ETag-г үүсгэнэ
-    const currentETag = await generateETagForFilesList(baseQuery);
 
-    // 3. Клиентээс ирсэн ETag-г шалгана
-    const clientETag = req.headers.get("if-none-match");
-    if (clientETag === currentETag) {
-      return new NextResponse(null, { status: 304 });
-    }
-
-    // ---- Data Fetching (if ETag mismatches) ----
     const snap = await baseQuery.limit(limit).get();
 
     const rows: QuizRow[] = snap.docs.map((d) => {
@@ -110,7 +85,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Сервер талд хийгдэх нэмэлт шүүлтүүр (free-text search)
+    // client талын free-text search
     const filtered = qParam
       ? rows.filter((r) => {
           const searchableString = `${r.title} ${r.uploadedByEmail ?? ""}`.toLowerCase();
@@ -118,18 +93,17 @@ export async function GET(req: NextRequest) {
         })
       : rows;
 
-    // Эрэмбэлэлт
+    // шинэ нь дээрээ гарах
     filtered.sort((a, b) => {
       const ta = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
       const tb = b.uploadedAt ? Date.parse(b.uploadedAt) : 0;
       return tb - ta;
     });
-    
-    // 4. Хариуг шинэ ETag-тэй хамт буцаана
-    const response = NextResponse.json({ ok: true, items: filtered });
-    response.headers.set("ETag", currentETag);
-    return response;
 
+    const res = NextResponse.json({ ok: true, items: filtered });
+    // кэш хийгдэхээс бүрэн сэргийлнэ
+    res.headers.set("Cache-Control", "no-store");
+    return res;
   } catch (e) {
     const err = e as Error;
     console.error("GET /api/teacher/files error:", err.message, err.stack);

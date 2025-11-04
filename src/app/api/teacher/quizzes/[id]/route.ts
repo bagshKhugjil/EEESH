@@ -1,9 +1,7 @@
 // /api/teacher/quizzes/[id]/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/adminApp";
 import { DecodedIdToken } from "firebase-admin/auth";
-import { createHash } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,22 +25,12 @@ type QuizDocumentData = {
   sourceFiles?: { part1?: string; part2?: string };
 };
 
-function generateETagForDocument(data: FirebaseFirestore.DocumentData | undefined): string {
-  if (!data) {
-    return '"not-found"';
-  }
-  const dataString = JSON.stringify(data);
-  const hash = createHash("md5").update(dataString).digest("hex");
-  return `"${hash}"`;
-}
-
-// ЗАСВАР 1: `context.params`-г Promise болгож зөв төрлийг зааж өгөв.
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    // --- auth ---
+    // --- Auth ---
     const authz = req.headers.get("Authorization");
     if (!authz?.startsWith("Bearer ")) {
       return NextResponse.json({ ok: false, error: "UNAUTHORIZED" }, { status: 401 });
@@ -54,10 +42,9 @@ export async function GET(
       return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
     }
 
-    // --- Өгөгдөл татах ---
-    // ЗАСВАР 2: Promise-г `await` ашиглан зөв тайлав.
+    // --- Params ---
     const { id } = await context.params;
-    const quizId = decodeURIComponent(id); // ← ЭНД нэмж байна
+    const quizId = decodeURIComponent(id);
     const ref = adminDb.collection("quizzes").doc(quizId);
 
     const doc = await ref.get();
@@ -65,16 +52,8 @@ export async function GET(
       return NextResponse.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
     }
 
-    // --- ETag-н логик ---
-    const docData = doc.data();
-    const currentETag = generateETagForDocument(docData);
-    const clientETag = req.headers.get("if-none-match");
-    if (clientETag === currentETag) {
-      return new NextResponse(null, { status: 304 });
-    }
-
-    // --- Өгөгдөл боловсруулах логик ---
-    const v = docData as QuizDocumentData;
+    // --- Data transform ---
+    const v = doc.data() as QuizDocumentData;
     const ua = v?.uploadedAt;
     let uploadedAtISO: string | undefined;
     if (ua && typeof (ua as FirebaseFirestore.Timestamp).toDate === "function") {
@@ -99,14 +78,16 @@ export async function GET(
       sourceFiles: v.sourceFiles ?? {},
     };
 
-    const response = NextResponse.json({ ok: true, quiz: quizData }, { status: 200 });
-    response.headers.set("ETag", currentETag);
-
-    return response;
-    
+    // --- Always fresh response ---
+    const res = NextResponse.json({ ok: true, quiz: quizData }, { status: 200 });
+    res.headers.set("Cache-Control", "no-store");
+    return res;
   } catch (e) {
     const err = e as Error;
     console.error(`[GET /api/teacher/quizzes/:id] SERVER_ERROR:`, err.message, err.stack);
-    return NextResponse.json({ ok: false, error: "SERVER_ERROR", detail: err.message }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: "SERVER_ERROR", detail: err.message },
+      { status: 500 }
+    );
   }
 }

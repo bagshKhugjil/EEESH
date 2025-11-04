@@ -35,24 +35,6 @@ type ModalState = {
   onConfirm?: () => void;
 };
 
-// --- ETag-тай кешлэхэд зориулсан төрөл ба функцууд ---
-type CachedFiles = {
-  etag: string;
-  data: QuizItem[];
-};
-
-const filesCacheKey = (subject: Subject | "") => subject ? `files_cache_${subject}_v1` : null;
-
-function safeJsonParse<T>(str: string | null): T | null {
-  if (!str) return null;
-  try {
-    return JSON.parse(str) as T;
-  } catch (e) {
-    console.error("LocalStorage-с JSON уншихад алдаа гарлаа:", e);
-    return null;
-  }
-}
-
 export default function TeacherFilesPage() {
   const { user } = useAuth();
 
@@ -105,19 +87,11 @@ export default function TeacherFilesPage() {
     setLoading(true);
     setErr(null);
 
-    const cacheKey = filesCacheKey(s);
     try {
       const token = await user.getIdToken();
-      const cached = cacheKey ? safeJsonParse<CachedFiles>(localStorage.getItem(cacheKey)) : null;
-
       const headers: HeadersInit = { Authorization: `Bearer ${token}` };
 
       const res = await fetch(`/api/teacher/files?subject=${encodeURIComponent(s)}`, { headers });
-
-      if (res.status === 304) {
-        if(cached?.data) setItems(cached.data);
-        return;
-      }
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ error: "Серверийн хариуг уншиж чадсангүй" }));
@@ -126,13 +100,7 @@ export default function TeacherFilesPage() {
       
       const data: { ok: boolean; items?: QuizItem[] } = await res.json();
       const newItems = Array.isArray(data.items) ? data.items : [];
-      const newETag = res.headers.get("etag");
-      
       setItems(newItems);
-
-      if (newETag && cacheKey) {
-        localStorage.setItem(cacheKey, JSON.stringify({ etag: newETag, data: newItems }));
-      }
     } catch (e) {
       setItems([]);
       setErr(e instanceof Error ? e.message : "Алдаа гарлаа");
@@ -156,10 +124,6 @@ export default function TeacherFilesPage() {
       
       setItems((prev) => prev.filter((x) => x.id !== quiz.id));
       
-      const cacheKey = filesCacheKey(subject);
-      if (cacheKey) {
-        localStorage.removeItem(cacheKey);
-      }
     } catch (e) {
       alert(e instanceof Error ? e.message : "Алдаа гарлаа");
     }
@@ -168,14 +132,7 @@ export default function TeacherFilesPage() {
   useEffect(() => {
     if (user && !subject && SUBJECTS.length) {
       const firstSubject = SUBJECTS[0];
-      
-      const cacheKey = filesCacheKey(firstSubject);
-      const cached = cacheKey ? safeJsonParse<CachedFiles>(localStorage.getItem(cacheKey)) : null;
-      if (cached) {
-        setSubject(firstSubject);
-        setItems(cached.data);
-      }
-      
+            
       fetchFiles(firstSubject);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
