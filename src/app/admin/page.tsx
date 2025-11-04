@@ -1109,7 +1109,7 @@ function AdminDashboardTabs() {
         </button>
         <button
           onClick={() => setActiveTab("students")}
-          className={`px-4 py-2 font-bold text см rounded-t-lg ${activeTab === "students" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "students" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
         >
           Сурагчдын жагсаалт
         </button>

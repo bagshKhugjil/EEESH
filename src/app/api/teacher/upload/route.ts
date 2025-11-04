@@ -33,7 +33,13 @@ type UploadPayload = {
 
 /** ---------- helpers ---------- */
 const slug = (s: string) =>
-  s.toLowerCase().replace(/[^a-z0-9\-_\s]/gi, "").trim().replace(/\s+/g, "-").slice(0, 120);
+  s
+    .toLowerCase()
+    // Монгол үсгүүдийг (а-я, ө, ү, ё) нэмээд
+    .replace(/[^a-z0-9а-яөүё\-_\s]/gi, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 120);
 
 const tsKey = (iso: string) => {
   const d = new Date(iso);

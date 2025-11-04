@@ -521,6 +521,13 @@ export default function TeacherUploadPage() {
 
           {/* Footer actions */}
           <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3">
+          <Link
+    href="/teacher/manual"
+    className="rounded-xl font-bold px-4 py-2 text-center"
+    style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+  >
+    Гараас дүн оруулах
+  </Link>
             <a
               className="rounded-xl font-bold px-4 py-2 text-center"
               href="https://docs.google.com/spreadsheets/d/19jHswtR9uxTRexVvCxPIPEzuQSSjs-9O7_32IXGEF4g/export?format=xlsx"
