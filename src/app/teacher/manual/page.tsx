@@ -350,6 +350,9 @@ export default function TeacherManualPage() {
       openModal("Амжилттай", "Гараас оруулсан дүн бүртгэгдлээ.", "success");
       setStatus("");
       setScoreByExt({});
+      if (subject) {
+        localStorage.removeItem(`files_cache_${subject}_v1`);
+      }
     } catch (e: any) {
       setStatus("");
       openModal("Алдаа", e.message ?? "Тодорхойгүй алдаа гарлаа.", "error");

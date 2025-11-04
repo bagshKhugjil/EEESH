@@ -1,7 +1,7 @@
 // src/app/teacher/quizzes/[id]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 
@@ -73,7 +73,6 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
   const [hasMore, setHasMore] = useState<boolean>(true);
 
   const [q, setQ] = useState("");
-  const initialLoadRef = useRef(true);
 
   const [sortConfig, setSortConfig] = useState<{
     key: keyof ResultItem | null;
@@ -81,9 +80,8 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
   }>({ key: null, direction: "ascending" });
 
   useEffect(() => {
-    // Энэ функц нь props.params-г Promise байсан ч, объект байсан ч зөв ажиллана.
     const resolveParams = async () => {
-      const p = await props.params; // Promise бол хүлээгээд, объект бол шууд авна
+      const p = await props.params;
       if (p.id) {
         setQuizId(decodeURIComponent(p.id));
       }
@@ -130,6 +128,14 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
 
       if (res.status === 304) {
         if (cached?.data) setMeta(cached.data);
+        return;
+      }
+
+      // ← НЭМЭЛТ: 404 ирвэл кешээ цэвэрлээд мессеж үзүүлнэ
+      if (res.status === 404) {
+        localStorage.removeItem(cacheKey);
+        setMeta(null);
+        setErrorMeta("Энэ шалгалт устгагдсан эсвэл олдсонгүй.");
         return;
       }
 
@@ -211,22 +217,31 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
   }
 
   useEffect(() => {
-    if (!user || !quizId || !initialLoadRef.current) return;
-    initialLoadRef.current = false;
+    // ← НЭМЭЛТ: user, quizId байж байж ажиллуулна
+    if (!user || !quizId) return;
 
+    // эхлээд энэ id-гийн кешийг түр харуулна
     const cachedMeta = safeJsonParse<CachedQuizMeta>(localStorage.getItem(metaCacheKey(quizId)));
-    if (cachedMeta) setMeta(cachedMeta.data);
+    if (cachedMeta) {
+      setMeta(cachedMeta.data);
+    } else {
+      setMeta(null); // хуучин шалгалт үлдэхээс сэргийлнэ
+    }
 
     const cachedResults = safeJsonParse<CachedResultItems>(localStorage.getItem(resultsCacheKey(quizId)));
     if (cachedResults) {
       setItems(cachedResults.data);
       setCursor(cachedResults.nextCursor);
       setHasMore(!!cachedResults.nextCursor);
+    } else {
+      setItems([]);
+      setCursor(null);
+      setHasMore(true);
     }
-    
+
+    // дараа нь серверээс шинэчилж авна
     fetchMetaWithETag();
     loadResultsWithETag(null);
-    
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, quizId]);
 
@@ -246,8 +261,8 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
         const bValue = b[sortConfig.key!];
         if (aValue === null || aValue === undefined) return 1;
         if (bValue === null || bValue === undefined) return -1;
-        if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
-        if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
+        if (aValue < bValue) return sortConfig.direction === "ascending" ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === "ascending" ? 1 : -1;
         return 0;
       });
     }

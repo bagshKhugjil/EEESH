@@ -52,9 +52,10 @@ export async function GET(
       return NextResponse.json({ ok: false, error: "FORBIDDEN" }, { status: 403 });
     }
 
-    // ---- Params ----
-    // ЗАСВАР 2: Promise-г `await` ашиглан зөв тайлав.
-    const { id: quizId } = await context.params;
+// ---- Params ----
+// ЗАСВАР 2: Promise-г `await` ашиглан зөв тайлав.
+const { id } = await context.params;
+const quizId = decodeURIComponent(id); // ← ЭНД нэмлээ
 
     // ---- Quiz existence check ----
     const quizSnap = await adminDb.collection("quizzes").doc(quizId).get();

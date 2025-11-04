@@ -57,7 +57,9 @@ export async function GET(
     // --- Өгөгдөл татах ---
     // ЗАСВАР 2: Promise-г `await` ашиглан зөв тайлав.
     const { id } = await context.params;
-    const ref = adminDb.collection("quizzes").doc(id);
+    const quizId = decodeURIComponent(id); // ← ЭНД нэмж байна
+    const ref = adminDb.collection("quizzes").doc(quizId);
+
     const doc = await ref.get();
     if (!doc.exists) {
       return NextResponse.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
