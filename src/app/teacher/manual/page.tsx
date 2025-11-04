@@ -189,124 +189,146 @@ export default function TeacherManualPage() {
     if (!className) return openModal("Анхааруулга", "Ангиа сонгоно уу!", "warning");
     if (!dateYMD) return openModal("Анхааруулга", "Огноогоо оруулна уу!", "warning");
     if (!user) return openModal("Анхааруулга", "Нэвтэрсэн байх шаардлагатай.", "warning");
+    // ШАЛГАЛТЫН НЭРИЙГ ЗААВАЛ БОЛГОСОН
+    if (!quizTitle.trim()) {
+      return openModal("Анхааруулга", "Шалгалтын нэрээ оруулна уу!", "warning");
+    }
   
-    // 1) сурагчдаас мөрүүдээ гаргана (чи хийж байсан логик бараг хэвээр)
+    // хэрвээ 1 хэсэгтэй бол, глобал асуулт хоосон ба нэг ч сурагч дээр асуулт бөглөөгүй бол анхааруул
+    if (examParts === 1) {
+      const hasGlobalQ = defaultQuestions1 !== "";
+      const hasAnyPerStudentQ = studentsOfClass.some((s) => {
+        const sc = scoreByExt[s.externalId];
+        return sc && sc.numQuestions1 !== "";
+      });
+      if (!hasGlobalQ && !hasAnyPerStudentQ) {
+        return openModal("Анхааруулга", "1-р хэсгийн нийт оноог (асуулт) дор хаяж нэг газар бөглөнө үү.", "warning");
+      }
+    } else {
+      // 2 хэсэгтэй үед хоёулангийнх нь оноо бүхэлдээ хоосон байвал анхааруулъя
+      const hasGlobalQ1 = defaultQuestions1 !== "";
+      const hasGlobalQ2 = defaultQuestions2 !== "";
+      const hasAnyPerStudentQ1 = studentsOfClass.some((s) => {
+        const sc = scoreByExt[s.externalId];
+        return sc && sc.numQuestions1 !== "";
+      });
+      const hasAnyPerStudentQ2 = studentsOfClass.some((s) => {
+        const sc = scoreByExt[s.externalId];
+        return sc && sc.numQuestions2 !== "";
+      });
+      if (!hasGlobalQ1 && !hasAnyPerStudentQ1 && !hasGlobalQ2 && !hasAnyPerStudentQ2) {
+        return openModal("Анхааруулга", "1 болон 2-р хэсгийн нийт онооноос ядаж нэгийг нь бөглөнө үү.", "warning");
+      }
+    }
+  
+    // --- цаашаа таны одоогийн rows үүсгээд явуулдаг хэсэг яг хэвээр ---
     const rows = studentsOfClass
-    .map((s) => {
-      const score = scoreByExt[s.externalId];
-      if (!score) return null;
+      .map((s) => {
+        const score = scoreByExt[s.externalId];
+        if (!score) return null;
   
-      if (examParts === 1) {
-        // ЗААВАЛ зөв хариу бичсэн байх ёстой
-        const hasCorrect = score.numCorrect1 !== "";
-        if (!hasCorrect) return null;
+        if (examParts === 1) {
+          const hasCorrect = score.numCorrect1 !== "";
+          if (!hasCorrect) return null;
   
-        const numQuestions =
-          defaultQuestions1 !== ""
-            ? Number(defaultQuestions1)
-            : score.numQuestions1 === ""
-            ? null
-            : Number(score.numQuestions1);
-  
-        const numCorrect = Number(score.numCorrect1);
-  
-        const percent =
-          numQuestions !== null && numQuestions > 0
-            ? Number(((numCorrect / numQuestions) * 100).toFixed(2))
-            : null;
-  
-        return {
-          externalId: s.externalId,
-          className,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          part1: {
-            numQuestions,
-            numCorrect,
-            percentCorrect: percent,
-          },
-        };
-      } else {
-        // 2 хэсэгтэй
-        const hasCorrect1 = score.numCorrect1 !== "";
-        const hasCorrect2 = score.numCorrect2 !== "";
-  
-        // Хоёр хэсэг дээр хоёуланд нь дүн байхгүй бол энэ хүүхдийг огт явуулахгүй
-        if (!hasCorrect1 && !hasCorrect2) return null;
-  
-        // 1-р хэсгийн тооцоо (зөвхөн дүнтэй бол)
-        let part1: any = undefined;
-        if (hasCorrect1) {
-          const numQ1 =
+          const numQuestions =
             defaultQuestions1 !== ""
               ? Number(defaultQuestions1)
               : score.numQuestions1 === ""
               ? null
               : Number(score.numQuestions1);
-          const numC1 = Number(score.numCorrect1);
-          const percent1 =
-            numQ1 !== null && numQ1 > 0
-              ? Number(((numC1 / numQ1) * 100).toFixed(2))
+  
+          const numCorrect = Number(score.numCorrect1);
+          const percent =
+            numQuestions !== null && numQuestions > 0
+              ? Number(((numCorrect / numQuestions) * 100).toFixed(2))
               : null;
-          part1 = {
-            numQuestions: numQ1,
-            numCorrect: numC1,
-            percentCorrect: percent1,
+  
+          return {
+            externalId: s.externalId,
+            className,
+            firstName: s.firstName,
+            lastName: s.lastName,
+            part1: {
+              numQuestions,
+              numCorrect,
+              percentCorrect: percent,
+            },
+          };
+        } else {
+          const hasCorrect1 = score.numCorrect1 !== "";
+          const hasCorrect2 = score.numCorrect2 !== "";
+          if (!hasCorrect1 && !hasCorrect2) return null;
+  
+          let part1: any = undefined;
+          if (hasCorrect1) {
+            const numQ1 =
+              defaultQuestions1 !== ""
+                ? Number(defaultQuestions1)
+                : score.numQuestions1 === ""
+                ? null
+                : Number(score.numQuestions1);
+            const numC1 = Number(score.numCorrect1);
+            const percent1 =
+              numQ1 !== null && numQ1 > 0
+                ? Number(((numC1 / numQ1) * 100).toFixed(2))
+                : null;
+            part1 = {
+              numQuestions: numQ1,
+              numCorrect: numC1,
+              percentCorrect: percent1,
+            };
+          }
+  
+          let part2: any = undefined;
+          if (hasCorrect2) {
+            const numQ2 =
+              defaultQuestions2 !== ""
+                ? Number(defaultQuestions2)
+                : score.numQuestions2 === ""
+                ? null
+                : Number(score.numQuestions2);
+            const numC2 = Number(score.numCorrect2);
+            const percent2 =
+              numQ2 !== null && numQ2 > 0
+                ? Number(((numC2 / numQ2) * 100).toFixed(2))
+                : null;
+            part2 = {
+              numQuestions: numQ2,
+              numCorrect: numC2,
+              percentCorrect: percent2,
+            };
+          }
+  
+          return {
+            externalId: s.externalId,
+            className,
+            firstName: s.firstName,
+            lastName: s.lastName,
+            ...(part1 ? { part1 } : {}),
+            ...(part2 ? { part2 } : {}),
           };
         }
-  
-        // 2-р хэсгийн тооцоо (зөвхөн дүнтэй бол)
-        let part2: any = undefined;
-        if (hasCorrect2) {
-          const numQ2 =
-            defaultQuestions2 !== ""
-              ? Number(defaultQuestions2)
-              : score.numQuestions2 === ""
-              ? null
-              : Number(score.numQuestions2);
-          const numC2 = Number(score.numCorrect2);
-          const percent2 =
-            numQ2 !== null && numQ2 > 0
-              ? Number(((numC2 / numQ2) * 100).toFixed(2))
-              : null;
-          part2 = {
-            numQuestions: numQ2,
-            numCorrect: numC2,
-            percentCorrect: percent2,
-          };
-        }
-  
-        return {
-          externalId: s.externalId,
-          className,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          ...(part1 ? { part1 } : {}),
-          ...(part2 ? { part2 } : {}),
-        };
-      }
-    })
-    .filter(Boolean) as any[];
+      })
+      .filter(Boolean) as any[];
   
     if (rows.length === 0) {
       return openModal("Анхааруулга", "Ядаж нэг сурагчид дүн оруулна уу.", "warning");
     }
   
-    // 2) upload-ийнх шиг quizName хийе
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
-    const ts = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    const finalQuizName = quizTitle || `${subject} — гараас оруулсан дүн — ${ts}`;
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
+      now.getHours()
+    )}:${pad(now.getMinutes())}`;
   
-    // 3) upload-ийн payload-тай 1:1
     const payload = {
       subject,
       class: className,
       date: dateYMD,
-      quizName: finalQuizName,
+      quizName: quizTitle.trim(), // одоо заавал байгаа
       uploadedAt: new Date().toISOString(),
       rows,
-      // file байхгүй болохоор ингэж ялгаатай гэж тэмдэглэчихье
       sourceFiles: { part1: "manual-input" },
     };
   
