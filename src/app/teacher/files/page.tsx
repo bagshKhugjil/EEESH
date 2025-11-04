@@ -111,9 +111,6 @@ export default function TeacherFilesPage() {
       const cached = cacheKey ? safeJsonParse<CachedFiles>(localStorage.getItem(cacheKey)) : null;
 
       const headers: HeadersInit = { Authorization: `Bearer ${token}` };
-      if (cached?.etag) {
-        headers["If-None-Match"] = cached.etag;
-      }
 
       const res = await fetch(`/api/teacher/files?subject=${encodeURIComponent(s)}`, { headers });
 

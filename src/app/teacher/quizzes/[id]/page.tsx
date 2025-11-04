@@ -134,7 +134,11 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
       // ← НЭМЭЛТ: 404 ирвэл кешээ цэвэрлээд мессеж үзүүлнэ
       if (res.status === 404) {
         localStorage.removeItem(cacheKey);
+        localStorage.removeItem(resultsCacheKey(quizId));
         setMeta(null);
+        setItems([]);        // хүснэгтийн мөрүүдийг хоосолно
+        setCursor(null);
+        setHasMore(false);
         setErrorMeta("Энэ шалгалт устгагдсан эсвэл олдсонгүй.");
         return;
       }
@@ -187,6 +191,15 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
         }
         return;
       }
+      // ⬇️ Энэ хэсгийг нэм
+if (res.status === 404) {
+  localStorage.removeItem(cacheKey);
+  setItems([]);
+  setCursor(null);
+  setHasMore(false);
+  setErrItems("Энэ шалгалтын дүн устгагдсан эсвэл олдсонгүй.");
+  return;
+}
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ error: "Серверийн хариуг уншиж чадсангүй" }));
