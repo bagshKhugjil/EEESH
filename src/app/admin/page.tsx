@@ -1,6 +1,7 @@
 // src/app/admin/page.tsx
 "use client";
 import StudentResultsTab from "@/components/admin/StudentResultsTab";
+import ClassSubjectResultsTab from "@/components/admin/ClassSubjectResultsTab";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import Image from "next/image";
@@ -354,11 +355,10 @@ function UsersManagement() {
                     key={role}
                     onClick={() => handleRoleChange(u, role)}
                     disabled={u.role === role}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all duration-200 border ${
-                      u.role === role
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all duration-200 border ${u.role === role
                         ? "bg-primary-bg text-primary-text border-transparent cursor-default"
                         : "bg-card2 border-stroke text-muted hover:bg-primary-bg/10 hover:border-primary-bg/20 hover:text-text disabled:opacity-100"
-                    }`}
+                      }`}
                   >
                     {role.charAt(0).toUpperCase() + role.slice(1)}
                   </button>
@@ -382,11 +382,10 @@ function UsersManagement() {
 
       {toast.show && (
         <div
-          className={`fixed bottom-5 right-5 flex items-center gap-3 p-4 rounded-lg border text-sm font-bold animate-fade-in-up ${
-            toast.type === "success"
+          className={`fixed bottom-5 right-5 flex items-center gap-3 p-4 rounded-lg border text-sm font-bold animate-fade-in-up ${toast.type === "success"
               ? "bg-green-500/10 border-green-500/20 text-green-400"
               : "bg-red-500/10 border-red-500/20 text-red-400"
-          }`}
+            }`}
         >
           {toast.type === "success" ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
           {toast.message}
@@ -1089,7 +1088,7 @@ function StudentListManager() {
 /* ======================== 4) Page with Tabs ======================== */
 
 function AdminDashboardTabs() {
-  const [activeTab, setActiveTab] = useState<"users" | "import" | "students" | "results" | "quizzes">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "import" | "students" | "results" | "classResults" | "quizzes">("users");
 
   return (
     <div className="card border border-stroke bg-card p-6 rounded-2xl">
@@ -1120,12 +1119,17 @@ function AdminDashboardTabs() {
           Сурагчийн дүн
         </button>
         <button
+          onClick={() => setActiveTab("classResults")}
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "classResults" ? "bg-primary-bg text-primary-text" : "bg-card2 text-muted hover:text-text"}`}
+        >
+          Анги/Хичээл
+        </button>
+        <button
           onClick={() => setActiveTab("quizzes")}
-          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${
-            activeTab === "quizzes"
+          className={`px-4 py-2 font-bold text-sm rounded-t-lg ${activeTab === "quizzes"
               ? "bg-primary-bg text-primary-text"
               : "bg-card2 text-muted hover:text-text"
-          }`}
+            }`}
         >
           Шалгалтууд
         </button>
@@ -1136,6 +1140,7 @@ function AdminDashboardTabs() {
       {activeTab === "import" && <StudentImportWithMapping />}
       {activeTab === "students" && <StudentListManager />}
       {activeTab === "results" && <StudentResultsTab />}
+      {activeTab === "classResults" && <ClassSubjectResultsTab />}
       {activeTab === "quizzes" && <QuizzesManager />}
     </div>
   );

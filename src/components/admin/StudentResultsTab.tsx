@@ -3,31 +3,29 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useStudentsStore } from "@/store/students-store";
-
-type ApiPayload = {
-  ok: boolean;
-  studentId: string;
-  subjects: string[];
-  results: Record<
-    string,
-    { average: number; history: Array<{ date: string; total: number; part1?: number; part2?: number }> }
-  >;
-};
+import { useResultsStore, StudentResults } from "@/store/results-store";
+import { Loader2, RefreshCw } from "lucide-react";
 
 export default function StudentResultsTab() {
   const { user } = useAuth();
 
-  // ✅ local(k) кэшээс сурагчдыг уншина
+  // ✅ Сурагчдын жагсаалт local кэшээс
   const students = useStudentsStore((s) => s.students);
+
+  // ✅ Дүнгийн store
+  const { data: resultsData, lastFetchedAt, setBulkResults } = useResultsStore();
 
   // Анги/сурагчийн шүүлт
   const [classFilter, setClassFilter] = useState<string>("");
   const [studentId, setStudentId] = useState<string>("");
 
-  // API data
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [data, setData] = useState<ApiPayload | null>(null);
+  // Bulk API loading state
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkErr, setBulkErr] = useState<string | null>(null);
+
+  // ✅ Кэш freshness (24 цаг)
+  const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  const isCacheFresh = !!lastFetchedAt && Date.now() - lastFetchedAt < CACHE_TTL_MS;
 
   // Ангиудын жагсаалт
   const classes = useMemo(() => {
@@ -39,7 +37,6 @@ export default function StudentResultsTab() {
   // Ангигаар шүүсэн сурагчид
   const filteredStudents = useMemo(() => {
     const arr = classFilter ? students.filter((s) => (s.class || "") === classFilter) : students;
-    // нэр/имэйл-ээр бага зэрэг эрэмбэлчихье
     return [...arr].sort((a, b) => {
       const A = `${a.lastName || ""} ${a.firstName || ""} ${a.email || ""}`.toLowerCase();
       const B = `${b.lastName || ""} ${b.firstName || ""} ${b.email || ""}`.toLowerCase();
@@ -50,77 +47,144 @@ export default function StudentResultsTab() {
   // Сонгогдсон анги өөрчлөгдөхөд сурагч сонголтыг reset
   useEffect(() => {
     setStudentId("");
-    setData(null);
-    setErr(null);
   }, [classFilter]);
 
-  const loadResults = useCallback(async () => {
-    if (!user || !studentId) return;
-    setLoading(true);
-    setErr(null);
-    setData(null);
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/students/${encodeURIComponent(studentId)}/results`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = (await res.json()) as ApiPayload & { error?: string };
-      if (!res.ok || !json.ok) throw new Error(json.error || "Дүн татаж чадсангүй.");
-      setData(json);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
-    } finally {
-      setLoading(false);
-    }
-  }, [user, studentId]);
+  // ✅ Бүх сурагчдын дүн багцаар татах
+  const loadBulkResults = useCallback(
+    async (force = false) => {
+      if (!user) return;
 
-  // Сурагч сонгогдмогц автоматаар татах
+      // Кэш шинэхэн бол дахин татахгүй
+      if (!force && isCacheFresh) {
+        return;
+      }
+
+      setBulkLoading(true);
+      setBulkErr(null);
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch(`/api/admin/students/results/bulk`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          throw new Error(json.error || "Дүн татаж чадсангүй.");
+        }
+
+        const json = (await res.json()) as { ok: boolean; data: Record<string, StudentResults>; error?: string };
+        if (!json.ok) throw new Error(json.error || "Дүн татаж чадсангүй.");
+
+        setBulkResults(json.data || {}, Date.now());
+      } catch (e) {
+        setBulkErr(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
+      } finally {
+        setBulkLoading(false);
+      }
+    },
+    [user, isCacheFresh, setBulkResults]
+  );
+
+  // Component mount үед bulk татах
   useEffect(() => {
-    if (studentId) void loadResults();
-  }, [studentId, loadResults]);
+    void loadBulkResults(false);
+  }, [loadBulkResults]);
+
+  // ✅ Сонгогдсон сурагчийн дүн local кэшээс
+  const selectedStudentData = useMemo(() => {
+    if (!studentId) return null;
+    return resultsData[studentId] || null;
+  }, [studentId, resultsData]);
 
   const selectedStudent = useMemo(
     () => students.find((s) => s.id === studentId) || null,
     [students, studentId]
   );
 
+  // Кэш хэзээ татсан харуулах
+  const cacheAge = useMemo(() => {
+    if (!lastFetchedAt) return "";
+    const minutes = Math.floor((Date.now() - lastFetchedAt) / 1000 / 60);
+    if (minutes < 1) return "Яг одоо";
+    if (minutes < 60) return `${minutes} минутын өмнө`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours} цагийн өмнө`;
+  }, [lastFetchedAt]);
+
   return (
     <div className="card border border-stroke bg-card p-6 rounded-2xl">
-      <h2 className="text-lg font-bold mb-4">Сурагчийн дүн (results_flat)</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold">Сурагчийн дүн (results_flat)</h2>
+
+        {/* Refresh товч болон кэш статус */}
+        <div className="flex items-center gap-2">
+          {lastFetchedAt && (
+            <span className="text-xs text-muted">
+              Кэш: {cacheAge}
+            </span>
+          )}
+          <button
+            onClick={() => void loadBulkResults(true)}
+            disabled={bulkLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-stroke bg-card2 text-text text-sm font-bold hover:bg-card hover:border-muted-stroke disabled:opacity-50"
+            title="Дахин татах"
+          >
+            <RefreshCw className={`w-4 h-4 ${bulkLoading ? "animate-spin" : ""}`} />
+            {bulkLoading ? "Татаж байна..." : "Шинэчлэх"}
+          </button>
+        </div>
+      </div>
+
+      {/* Bulk loading state */}
+      {bulkLoading && !lastFetchedAt && (
+        <div className="flex items-center justify-center py-10 text-muted">
+          <Loader2 className="animate-spin mr-2" />
+          <span>Бүх сурагчдын дүн татаж байна...</span>
+        </div>
+      )}
+
+      {/* Bulk error */}
+      {bulkErr && (
+        <div className="mb-4 text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+          {bulkErr}
+        </div>
+      )}
 
       {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-3 mb-4">
-        <select
-          value={classFilter}
-          onChange={(e) => setClassFilter(e.target.value)}
-          className="w-full md:w-60 rounded-md px-3 py-2 text-sm"
-          style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
-          aria-label="Анги шүүх"
-        >
-          <option value="">Бүх анги</option>
-          {classes.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+      {!bulkLoading && (
+        <div className="flex flex-col md:flex-row gap-3 mb-4">
+          <select
+            value={classFilter}
+            onChange={(e) => setClassFilter(e.target.value)}
+            className="w-full md:w-60 rounded-md px-3 py-2 text-sm"
+            style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+            aria-label="Анги шүүх"
+          >
+            <option value="">Бүх анги</option>
+            {classes.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
 
-        <select
-          value={studentId}
-          onChange={(e) => setStudentId(e.target.value)}
-          className="w-full md:w-80 rounded-md px-3 py-2 text-sm"
-          style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
-          aria-label="Сурагч сонгох"
-        >
-          <option value="">— Сурагч сонгох —</option>
-          {filteredStudents.map((s) => {
-            const label = `${s.lastName || ""} ${s.firstName || ""}`.trim() || s.email || s.id;
-            return (
-              <option key={s.id} value={s.id}>
-                {label} {s.class ? `• ${s.class}` : ""} {s.email ? `• ${s.email}` : ""}
-              </option>
-            );
-          })}
-        </select>
-      </div>
+          <select
+            value={studentId}
+            onChange={(e) => setStudentId(e.target.value)}
+            className="w-full md:w-80 rounded-md px-3 py-2 text-sm"
+            style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+            aria-label="Сурагч сонгох"
+          >
+            <option value="">— Сурагч сонгох —</option>
+            {filteredStudents.map((s) => {
+              const label = `${s.lastName || ""} ${s.firstName || ""}`.trim() || s.email || s.id;
+              return (
+                <option key={s.id} value={s.id}>
+                  {label} {s.class ? `• ${s.class}` : ""} {s.email ? `• ${s.email}` : ""}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
 
       {/* Summary of chosen student */}
       {selectedStudent && (
@@ -134,16 +198,14 @@ export default function StudentResultsTab() {
       {/* Content */}
       {!studentId ? (
         <div className="text-muted">Дээрээс анги, дараа нь сурагч сонгоно уу.</div>
-      ) : loading ? (
-        <div className="text-muted">Ачаалж байна…</div>
-      ) : err ? (
-        <div className="text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-3">{err}</div>
-      ) : data && data.subjects.length === 0 ? (
+      ) : !selectedStudentData ? (
+        <div className="text-muted">Энэ сурагчийн дүн олдсонгүй.</div>
+      ) : selectedStudentData.subjects.length === 0 ? (
         <div className="text-muted">Дүн олдсонгүй.</div>
-      ) : data ? (
+      ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {data.subjects.map((subj) => {
-            const bucket = data.results[subj];
+          {selectedStudentData.subjects.map((subj) => {
+            const bucket = selectedStudentData.results[subj];
             return (
               <div key={subj} className="border border-stroke rounded-xl overflow-hidden">
                 <div className="px-4 py-3 bg-card2 border-b border-stroke flex items-center justify-between">
@@ -181,7 +243,7 @@ export default function StudentResultsTab() {
             );
           })}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
