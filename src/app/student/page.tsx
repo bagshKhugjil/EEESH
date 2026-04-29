@@ -327,7 +327,7 @@ export default function StudentOnlyPage() {
             <label className="text-[var(--muted)] text-xs sm:text-sm">Хичээл</label>
             <select
               className="flex-1 sm:flex-none rounded-lg px-3 py-2 text-sm sm:text-base"
-              style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+              
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
             >

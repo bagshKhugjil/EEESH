@@ -200,7 +200,7 @@ export default function TeacherFilesPage() {
             onChange={(e) => setQ(e.target.value)}
             placeholder="Файлын нэр/үүсгэсэн имэйлээр хайх…"
             className="w-full rounded-md px-3 py-2 text-sm sm:text-base"
-            style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+            
           />
         </div>
       </div>

@@ -157,7 +157,7 @@ export default function StudentResultsTab() {
             value={classFilter}
             onChange={(e) => setClassFilter(e.target.value)}
             className="w-full md:w-60 rounded-md px-3 py-2 text-sm"
-            style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+            
             aria-label="Анги шүүх"
           >
             <option value="">Бүх анги</option>
@@ -170,7 +170,7 @@ export default function StudentResultsTab() {
             value={studentId}
             onChange={(e) => setStudentId(e.target.value)}
             className="w-full md:w-80 rounded-md px-3 py-2 text-sm"
-            style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+            
             aria-label="Сурагч сонгох"
           >
             <option value="">— Сурагч сонгох —</option>

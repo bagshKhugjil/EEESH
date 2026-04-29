@@ -298,14 +298,14 @@ function UsersManagement() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Нэр/имэйлээр хайх…"
           className="w-full sm:max-w-sm rounded-md px-3 py-2 text-sm"
-          style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+          
           aria-label="Нэр эсвэл имэйлээр хайх"
         />
         <select
           value={roleFilter}
           onChange={(e) => setRoleFilter(e.target.value as any)}
           className="w-full sm:w-48 rounded-md px-3 py-2 text-sm"
-          style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+          
           aria-label="Роль шүүх"
         >
           <option value="all">Бүгд</option>

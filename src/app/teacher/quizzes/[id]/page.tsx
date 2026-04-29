@@ -264,7 +264,7 @@ export default function QuizDetailPage(props: { params: { id: string } | Promise
             <Link
               href="/teacher/files"
               className="rounded-md px-3 py-2 text-sm font-bold whitespace-nowrap"
-              style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+              
             >
               Буцах
             </Link>

@@ -39,7 +39,9 @@ function genTempPassword(len = 12) {
 }
 
 function cleanStr(s: unknown): string {
-  return typeof s === "string" ? s.trim() : "";
+  if (typeof s === "string") return s.trim();
+  if (typeof s === "number") return String(s);
+  return "";
 }
 
 function nonEmptyOrNull(v: unknown): string | null {

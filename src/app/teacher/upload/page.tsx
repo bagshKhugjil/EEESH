@@ -433,7 +433,7 @@ export default function TeacherUploadPage() {
                 onChange={(e)=>setClassName(e.target.value)}
                 placeholder="ж: 12A"
                 className="w-full rounded-md px-3 py-2 text-sm"
-                style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+                
               />
             </div>
             <div>
@@ -443,7 +443,7 @@ export default function TeacherUploadPage() {
                 value={dateYMD}
                 onChange={(e)=>setDateYMD(e.target.value)}
                 className="w-full rounded-md px-3 py-2 text-sm"
-                style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+                
               />
             </div>
           </div>
@@ -524,7 +524,7 @@ export default function TeacherUploadPage() {
           <Link
     href="/teacher/manual"
     className="rounded-xl font-bold px-4 py-2 text-center"
-    style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+    
   >
     Гараас дүн оруулах
   </Link>
@@ -540,7 +540,7 @@ export default function TeacherUploadPage() {
             <Link
               href="/teacher"
               className="rounded-xl font-bold px-4 py-2 text-center"
-              style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+              
             >
               Буцах
             </Link>
@@ -581,7 +581,7 @@ export default function TeacherUploadPage() {
             </p>
             <button
               className="rounded-xl font-bold px-4 py-2 w-full"
-              style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+              
               onClick={closeModal}
             >
               Ойлголоо

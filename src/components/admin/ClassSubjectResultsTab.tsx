@@ -183,7 +183,7 @@ export default function ClassSubjectResultsTab() {
                         value={selectedClass}
                         onChange={(e) => setSelectedClass(e.target.value)}
                         className="w-full rounded-md px-3 py-2 text-sm"
-                        style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+                        
                         aria-label="Анги сонгох"
                     >
                         <option value="">— Анги сонгох —</option>
@@ -197,7 +197,7 @@ export default function ClassSubjectResultsTab() {
                         value={selectedSubject}
                         onChange={(e) => setSelectedSubject(e.target.value)}
                         className="w-full rounded-md px-3 py-2 text-sm"
-                        style={{ background: "var(--card2)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+                        
                         aria-label="Хичээл сонгох"
                     >
                         <option value="">— Хичээл сонгох —</option>

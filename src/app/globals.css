@@ -24,6 +24,70 @@ html.light {
   --primary-text: #ffffff;
 }
 
+/* ── Beautiful global select ── */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--card);
+  color: var(--text);
+  border: 1px solid var(--stroke);
+  border-radius: 0.625rem;          /* 10px */
+  padding: 0.5rem 2.5rem 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+
+  /* Custom chevron arrow */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 1rem;
+}
+
+select:hover {
+  border-color: var(--primary-bg);
+  background-color: var(--card2);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--primary-bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-bg) 25%, transparent);
+}
+
+select option {
+  background-color: var(--card);
+  color: var(--text);
+  padding: 0.5rem;
+}
+
+/* ── Global input ── */
+input[type="text"],
+input[type="email"],
+input[type="search"],
+input[type="password"],
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]) {
+  background-color: var(--card);
+  color: var(--text);
+  border: 1px solid var(--stroke);
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):hover {
+  border-color: var(--primary-bg);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):focus {
+  outline: none;
+  border-color: var(--primary-bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-bg) 25%, transparent);
+}
+
 .animate-fade-in-up {
     animation: fade-in-up 0.3s ease-out;
 }
