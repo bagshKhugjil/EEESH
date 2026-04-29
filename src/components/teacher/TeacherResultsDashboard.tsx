@@ -5,7 +5,8 @@ import CustomSelect, { SelectOption } from "@/components/ui/CustomSelect";
 import { useAuth } from "@/components/auth-provider";
 import { useStudentsStore } from "@/store/students-store";
 import { useResultsStore } from "@/store/results-store";
-import { Loader2, RefreshCw, GraduationCap, TrendingUp, BarChart2, Activity } from "lucide-react";
+import { Loader2, RefreshCw, GraduationCap, TrendingUp, BarChart2, Activity, ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 
 const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
@@ -317,6 +318,16 @@ export default function TeacherResultsDashboard() {
       {/* ── Header ── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
+          {/* Буцах товч */}
+          <Link
+            href="/teacher"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-stroke bg-card2 text-muted text-sm font-bold hover:text-text hover:border-indigo-500/40 hover:bg-indigo-500/10 transition-all"
+            title="Багшийн нүүр рүү буцах"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Буцах</span>
+          </Link>
+
           <div className="bg-indigo-500/10 p-2 rounded-lg border border-indigo-500/20">
             <GraduationCap className="w-6 h-6 text-indigo-400" />
           </div>
