@@ -69,6 +69,67 @@ async function deleteFromResultsFlatByStudentId(studentId: string) {
   }
 }
 
+const ALLOWED_PATCH_FIELDS = [
+  "firstName",
+  "lastName",
+  "email",
+  "class",
+  "grade",
+  "parentEmail1",
+  "parentEmail2",
+  "externalId",
+] as const;
+
+type PatchField = (typeof ALLOWED_PATCH_FIELDS)[number];
+
+export async function PATCH(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  try {
+    await mustBeAdmin(req);
+    const { id } = await ctx.params;
+    const studentId = (id || "").trim();
+    if (!studentId) {
+      return NextResponse.json({ ok: false, error: "MISSING_ID" }, { status: 400 });
+    }
+
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ ok: false, error: "INVALID_BODY" }, { status: 400 });
+    }
+
+    const updates: Record<string, string | null> = {};
+    for (const field of ALLOWED_PATCH_FIELDS) {
+      if (field in body) {
+        const val = (body as Record<string, unknown>)[field];
+        updates[field] = typeof val === "string" ? val.trim() || null : null;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ ok: false, error: "NO_FIELDS" }, { status: 400 });
+    }
+
+    const ref = adminDb.collection("students").doc(studentId);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return NextResponse.json({ ok: false, error: "NOT_FOUND" }, { status: 404 });
+    }
+
+    await ref.update({ ...updates, updatedAt: new Date() });
+
+    return NextResponse.json({ ok: true, studentId, updated: updates });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const code =
+      msg === "UNAUTHORIZED" ? 401 :
+      msg === "INVALID_TOKEN" ? 401 :
+      msg === "FORBIDDEN" ? 403 : 500;
+    return NextResponse.json({ ok: false, error: msg }, { status: code });
+  }
+}
+
 export async function DELETE(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> } // Next.js 15

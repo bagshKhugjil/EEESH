@@ -11,14 +11,16 @@ export const dynamic = "force-dynamic";
 type AllowedRole = "admin";
 interface DecodedWithRole extends DecodedIdToken { role?: string }
 
-// Firestore-оос ирэх өгөгдлийн бүтцийг тодорхойлов
 type StudentDocumentData = {
   firstName?: string | null;
   lastName?: string | null;
   class?: string | null;
+  grade?: string | null;
   email?: string | null;
   externalId?: string | number | null;
-  updatedAt?: FirebaseFirestore.Timestamp; // ETag-д ашиглагдана
+  parentEmail1?: string | null;
+  parentEmail2?: string | null;
+  updatedAt?: FirebaseFirestore.Timestamp;
 };
 
 type StudentListItem = {
@@ -26,8 +28,11 @@ type StudentListItem = {
   firstName: string | null;
   lastName: string | null;
   class: string | null;
+  grade: string | null;
   email: string | null;
   externalId?: string | number | null;
+  parentEmail1: string | null;
+  parentEmail2: string | null;
 };
 
 async function mustBeAdmin(req: NextRequest) {
@@ -119,8 +124,11 @@ export async function GET(req: NextRequest) {
           firstName: v.firstName ?? null,
           lastName: v.lastName ?? null,
           class: v.class ?? null,
+          grade: v.grade ?? null,
           email: v.email ?? null,
           externalId: v.externalId ?? null,
+          parentEmail1: v.parentEmail1 ?? null,
+          parentEmail2: v.parentEmail2 ?? null,
         };
       })
       .filter((r) => {

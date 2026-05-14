@@ -5,14 +5,14 @@ import { persist, createJSONStorage } from "zustand/middleware";
 /** Admin UI-д ашиглаж буй сурагчийн бүтэц */
 export type Student = {
   id: string;
-  firstName?: string;
-  lastName?: string;
+  firstName?: string | null;
+  lastName?: string | null;
   email: string;
-  grade?: string;
-  class?: string;
-  parentEmail1?: string;
-  parentEmail2?: string;
-  externalId?: string;
+  grade?: string | null;
+  class?: string | null;
+  parentEmail1?: string | null;
+  parentEmail2?: string | null;
+  externalId?: string | number | null;
   role?: string;
 };
 

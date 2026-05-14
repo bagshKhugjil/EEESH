@@ -643,6 +643,7 @@ function StudentListManager() {
   const {
     students,
     setStudents,
+    upsertMany,
     removeByIds,
     lastFetchedAt,
   } = useStudentsStore();
@@ -651,6 +652,42 @@ function StudentListManager() {
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+
+  // ---- Edit modal ----
+  const [editingStudent, setEditingStudent] = useState<StudentType | null>(null);
+  const [editFields, setEditFields] = useState({ parentEmail1: "", parentEmail2: "" });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+
+  const openEdit = (s: StudentType) => {
+    setEditingStudent(s);
+    setEditFields({ parentEmail1: s.parentEmail1 || "", parentEmail2: s.parentEmail2 || "" });
+    setEditErr(null);
+  };
+
+  const closeEdit = () => { setEditingStudent(null); setEditErr(null); };
+
+  const saveEdit = async () => {
+    if (!user || !editingStudent) return;
+    setEditSaving(true);
+    setEditErr(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/admin/students/${encodeURIComponent(editingStudent.id)}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(editFields),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Хадгалах амжилтгүй.");
+      upsertMany([{ ...editingStudent, ...editFields }]);
+      closeEdit();
+    } catch (e) {
+      setEditErr(e instanceof Error ? e.message : "Тодорхойгүй алдаа.");
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   // ✅ ETag — санах ойд хадгална (ref + sessionStorage)
   const studentsETagRef = useRef<string | null>(null);
@@ -670,6 +707,11 @@ function StudentListManager() {
 
   const [sortKey, setSortKey] = useState<SortKey>("lastName");
   const [sortDir, setSortDir] = useState<SortDir>(null);
+
+  // ✅ filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [classFilter, setClassFilter] = useState("all");
+  const [parentEmailFilter, setParentEmailFilter] = useState<"all" | "has" | "none">("all");
 
   // ✅ pagination state
   const [page, setPage] = useState(1);
@@ -696,13 +738,19 @@ function StudentListManager() {
         const token = await user.getIdToken();
 
         const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-        const storedEtag =
-          studentsETagRef.current ??
-          (typeof window !== "undefined" ? sessionStorage.getItem("ETAG_/api/admin/students") : null);
-        if (storedEtag) headers["If-None-Match"] = storedEtag;
+        if (!force) {
+          const storedEtag =
+            studentsETagRef.current ??
+            (typeof window !== "undefined" ? sessionStorage.getItem("ETAG_/api/admin/students") : null);
+          if (storedEtag) headers["If-None-Match"] = storedEtag;
+        } else {
+          studentsETagRef.current = null;
+          if (typeof window !== "undefined") sessionStorage.removeItem("ETAG_/api/admin/students");
+        }
 
         const res = await fetch("/api/admin/students?pageSize=200", {
           headers,
+          cache: "no-store",
         });
 
         if (res.status === 304) {
@@ -778,18 +826,40 @@ function StudentListManager() {
     return arr;
   }, [students, sortKey, sortDir]);
 
+  // ✅ unique classes for dropdown
+  const classOptions = useMemo(() => {
+    const set = new Set<string>();
+    students.forEach((s) => { if (s.class) set.add(s.class); });
+    return Array.from(set).sort();
+  }, [students]);
+
+  // ✅ filter
+  const filteredStudents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return sortedStudents.filter((s) => {
+      if (q) {
+        const hay = `${s.lastName ?? ""} ${s.firstName ?? ""} ${s.email ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (classFilter !== "all" && s.class !== classFilter) return false;
+      if (parentEmailFilter === "has" && !s.parentEmail1 && !s.parentEmail2) return false;
+      if (parentEmailFilter === "none" && (s.parentEmail1 || s.parentEmail2)) return false;
+      return true;
+    });
+  }, [sortedStudents, searchQuery, classFilter, parentEmailFilter]);
+
   // ✅ pagination slices
-  const total = sortedStudents.length;
+  const total = filteredStudents.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.max(1, Math.min(page, totalPages));
   const startIdx = (currentPage - 1) * pageSize;
   const endIdx = Math.min(startIdx + pageSize, total);
-  const visible = sortedStudents.slice(startIdx, endIdx);
+  const visible = filteredStudents.slice(startIdx, endIdx);
 
-  // sort / pageSize солигдоход 1-р хуудас руу буцаана
+  // sort / filter / pageSize солигдоход 1-р хуудас руу буцаана
   useEffect(() => {
     setPage(1);
-  }, [sortKey, sortDir, pageSize]);
+  }, [sortKey, sortDir, pageSize, searchQuery, classFilter, parentEmailFilter]);
 
   // ✅ selection (хуудсан дахь мөрүүд)
   const isAllSelected = useMemo(
@@ -908,6 +978,82 @@ function StudentListManager() {
 
   return (
     <div className="card border border-stroke bg-card p-6 rounded-2xl">
+      {/* ---- Edit Modal ---- */}
+      {editingStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div
+            className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
+            style={{ background: "var(--card)", border: "1px solid var(--stroke)", color: "var(--text)" }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="font-bold text-base">
+                  {editingStudent.lastName} {editingStudent.firstName}
+                </div>
+                <div className="text-xs text-[var(--muted)]">{editingStudent.email}</div>
+              </div>
+              <button
+                onClick={closeEdit}
+                className="text-[var(--muted)] hover:text-[var(--text)] text-xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-[var(--muted)] mb-1">
+                  Эцэг/эхийн имэйл 1
+                </label>
+                <input
+                  type="email"
+                  value={editFields.parentEmail1}
+                  onChange={(e) => setEditFields((f) => ({ ...f, parentEmail1: e.target.value }))}
+                  placeholder="parent1@example.com"
+                  className="w-full rounded-lg px-3 py-2 text-sm border"
+                  style={{ background: "var(--bg)", borderColor: "var(--stroke)", color: "var(--text)" }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[var(--muted)] mb-1">
+                  Эцэг/эхийн имэйл 2
+                </label>
+                <input
+                  type="email"
+                  value={editFields.parentEmail2}
+                  onChange={(e) => setEditFields((f) => ({ ...f, parentEmail2: e.target.value }))}
+                  placeholder="parent2@example.com"
+                  className="w-full rounded-lg px-3 py-2 text-sm border"
+                  style={{ background: "var(--bg)", borderColor: "var(--stroke)", color: "var(--text)" }}
+                />
+              </div>
+            </div>
+
+            {editErr && (
+              <div className="mt-3 text-red-400 text-sm">{editErr}</div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button
+                onClick={closeEdit}
+                disabled={editSaving}
+                className="px-4 py-2 rounded-lg text-sm font-bold border"
+                style={{ borderColor: "var(--stroke)", color: "var(--muted)", background: "var(--bg)" }}
+              >
+                Болих
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={editSaving}
+                className="px-4 py-2 rounded-lg bg-blue-500/90 text-white text-sm font-bold disabled:opacity-50"
+              >
+                {editSaving ? "Хадгалж байна…" : "Хадгалах"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
           <div className="bg-green-500/10 p-2 rounded-lg border border-green-500/20">
@@ -980,6 +1126,44 @@ function StudentListManager() {
         </div>
       </div>
 
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <input
+          type="text"
+          placeholder="Нэр, имэйлээр хайх…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm flex-1 min-w-[180px]"
+        />
+        <select
+          value={classFilter}
+          onChange={(e) => setClassFilter(e.target.value)}
+          className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm"
+        >
+          <option value="all">Бүх анги</option>
+          {classOptions.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <select
+          value={parentEmailFilter}
+          onChange={(e) => setParentEmailFilter(e.target.value as "all" | "has" | "none")}
+          className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm"
+        >
+          <option value="all">Бүх эцэг эх</option>
+          <option value="has">Эцэг эхийн имэйл бүртгэлтэй</option>
+          <option value="none">Эцэг эхийн имэйл байхгүй</option>
+        </select>
+        {(searchQuery || classFilter !== "all" || parentEmailFilter !== "all") && (
+          <button
+            onClick={() => { setSearchQuery(""); setClassFilter("all"); setParentEmailFilter("all"); }}
+            className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-muted text-sm"
+          >
+            Цэвэрлэх
+          </button>
+        )}
+      </div>
+
       {loading ? (
         <SkeletonLoader />
       ) : err ? (
@@ -1039,14 +1223,24 @@ function StudentListManager() {
                     <td className="px-3 py-2">{s.parentEmail2 || ""}</td>
                     <td className="px-3 py-2">{s.externalId || s.id}</td>
                     <td className="px-3 py-2">
-                      <button
-                        onClick={() => void deleteOne(s.id)}
-                        disabled={busy}
-                        className="px-3 py-1.5 rounded-md bg-red-500/90 text-white text-xs font-bold disabled:opacity-50"
-                        title="Устгах"
-                      >
-                        {busy ? "Устгаж…" : "Устгах"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => openEdit(s)}
+                          disabled={busy}
+                          className="px-3 py-1.5 rounded-md bg-blue-500/90 text-white text-xs font-bold disabled:opacity-50"
+                          title="Засах"
+                        >
+                          Засах
+                        </button>
+                        <button
+                          onClick={() => void deleteOne(s.id)}
+                          disabled={busy}
+                          className="px-3 py-1.5 rounded-md bg-red-500/90 text-white text-xs font-bold disabled:opacity-50"
+                          title="Устгах"
+                        >
+                          {busy ? "Устгаж…" : "Устгах"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
