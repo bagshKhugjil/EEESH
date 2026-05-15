@@ -62,21 +62,44 @@ function computeTotals(row: {
   return { total: null, part1: p1, part2: p2 };
 }
 
+export type PartStatsView = {
+  numQuestions: number | null;
+  numCorrect: number | null;
+};
+
+export type HistoryItem = {
+  id: string;
+  quizId: string;
+  date: string;
+  total: number;
+  part1?: number;
+  part2?: number;
+  part1Stats?: PartStatsView;
+  part2Stats?: PartStatsView;
+};
+
 export type StudentResultEntry = {
   subjects: string[];
   results: Record<
     string,
     {
       average: number;
-      history: Array<{
-        date: string;
-        total: number;
-        part1?: number;
-        part2?: number;
-      }>;
+      history: HistoryItem[];
     }
   >;
 };
+
+function extractPartStats(x: unknown): PartStatsView | undefined {
+  if (!x || typeof x !== "object") return undefined;
+  const obj = x as Record<string, unknown>;
+  const nq = toNum(obj.numQuestions);
+  const nc = toNum(obj.numCorrect);
+  if (nq === undefined && nc === undefined) return undefined;
+  return {
+    numQuestions: typeof nq === "number" ? nq : null,
+    numCorrect: typeof nc === "number" ? nc : null,
+  };
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -99,7 +122,7 @@ export async function GET(req: NextRequest) {
     // results_flat коллекцоос бүх мөр татах
     const snap = await adminDb
       .collection("results_flat")
-      .select("studentId", "subject", "date", "score", "raw")
+      .select("studentId", "subject", "date", "score", "raw", "quizId")
       .limit(10000)
       .get();
 
@@ -111,12 +134,7 @@ export async function GET(req: NextRequest) {
           string,
           {
             totals: number[];
-            history: Array<{
-              date: string;
-              total: number;
-              part1?: number;
-              part2?: number;
-            }>;
+            history: HistoryItem[];
           }
         >;
         subjects: Set<string>;
@@ -130,6 +148,7 @@ export async function GET(req: NextRequest) {
         date?: string;
         score?: number | string;
         raw?: Record<string, unknown>;
+        quizId?: string;
       };
 
       const studentId = String(v.studentId ?? "").trim();
@@ -142,6 +161,9 @@ export async function GET(req: NextRequest) {
       const date =
         typeof v.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.date) ? v.date : "";
 
+      const part1Stats = extractPartStats(v?.raw?.part1);
+      const part2Stats = extractPartStats(v?.raw?.part2);
+
       if (!byStudent[studentId]) {
         byStudent[studentId] = { perSubject: {}, subjects: new Set() };
       }
@@ -153,10 +175,14 @@ export async function GET(req: NextRequest) {
 
       byStudent[studentId].perSubject[subject].totals.push(total);
       byStudent[studentId].perSubject[subject].history.push({
+        id: d.id,
+        quizId: String(v.quizId ?? ""),
         date,
         total: Number(total.toFixed(1)),
         ...(typeof part1 === "number" ? { part1: Number(part1.toFixed(1)) } : {}),
         ...(typeof part2 === "number" ? { part2: Number(part2.toFixed(1)) } : {}),
+        ...(part1Stats ? { part1Stats } : {}),
+        ...(part2Stats ? { part2Stats } : {}),
       });
     }
 

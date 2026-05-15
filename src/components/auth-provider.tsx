@@ -27,18 +27,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        // force=false: кэшлэгдсэн token уншина — login дараа force=true хийсэн байна
         const tokenResult = await firebaseUser.getIdTokenResult();
-        
-        // --- ЗАСВАР ЭНД ХИЙГДЛЭЭ ---
-        // `firebaseUser` объектыг хуулахын оронд шууд өөр дээр нь ажиллаж, 
-        // төрлийг нь `AppUser` болгон өргөтгөж байна. Ингэснээр `getIdToken` зэрэг
-        // функцууд нь хэвээр үлдэнэ.
         const userWithRole = firebaseUser as AppUser;
         userWithRole.role = tokenResult.claims.role as string | undefined;
-        
         setUser(userWithRole);
-        // -----------------------------
-
       } else {
         setUser(null);
       }

@@ -49,14 +49,24 @@ export default function Home() {
     }
   }, []);
 
-  // Google login (ЗАСВАРЛАСАН ХЭСЭГ)
+  // Google login
   const handleGoogleLogin = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      // ID token-г сэргээж custom claims (role)-г авчрах нь чухал.
-      await result.user.getIdToken(true);
-      // ЭНЭ ХЭСЭГТ router.replace ХИЙХ ШААРДЛАГАГҮЙ.
-      // Дээрх useEffect hook энэ ажлыг хийнэ.
+      const token = await result.user.getIdToken();
+
+      // Role байхгүй бол автоматаар илрүүлнэ
+      const res = await fetch("/api/auth/detect-role", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+
+      if (data.role) {
+        // Custom claim тохируулсан тул token refresh хийнэ
+        await result.user.getIdToken(true);
+      }
+      // Дээрх useEffect-ийн role шалгалт чиглүүлэх ажлыг хийнэ
     } catch (err) {
       console.error("Google login error:", err);
     }

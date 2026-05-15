@@ -4,15 +4,14 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import CustomSelect, { SelectOption } from "@/components/ui/CustomSelect";
 import { useAuth } from "@/components/auth-provider";
 import { useStudentsStore } from "@/store/students-store";
-import { useResultsStore } from "@/store/results-store";
-import { Loader2, RefreshCw, GraduationCap, TrendingUp, BarChart2, Activity, ArrowLeft } from "lucide-react";
+import { useResultsStore, type HistoryItem, type PartStatsView } from "@/store/results-store";
+import { Loader2, RefreshCw, GraduationCap, TrendingUp, BarChart2, Activity, ArrowLeft, Pencil, X } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 
 const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
 /* ─────────────── Types ─────────────── */
-type HistoryItem = { date: string; total: number; part1?: number; part2?: number };
 type SubjectResult = { average: number; history: HistoryItem[] };
 
 /* ─────────────── Helpers ─────────────── */
@@ -190,6 +189,182 @@ function BarCard({ subjects, results }: { subjects: string[]; results: Record<st
   );
 }
 
+/* ─────────────── Edit Modal ─────────────── */
+type EditTarget = {
+  studentId: string;
+  subject: string;
+  item: HistoryItem;
+};
+
+function EditResultModal({
+  target,
+  getToken,
+  onClose,
+  onSaved,
+}: {
+  target: EditTarget;
+  getToken: () => Promise<string>;
+  onClose: () => void;
+  onSaved: (patch: Partial<HistoryItem>) => void;
+}) {
+  const p1 = target.item.part1Stats;
+  const p2 = target.item.part2Stats;
+
+  const editable1 = !!p1 && (p1.numQuestions ?? 0) > 0;
+  const editable2 = !!p2 && (p2.numQuestions ?? 0) > 0;
+
+  const [nc1, setNc1] = useState<string>(p1?.numCorrect != null ? String(p1.numCorrect) : "");
+  const [nc2, setNc2] = useState<string>(p2?.numCorrect != null ? String(p2.numCorrect) : "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const validate = (s: string, max: number): number | null => {
+    if (s.trim() === "") return null;
+    const n = Number(s);
+    if (!Number.isFinite(n) || n < 0 || n > max) return null;
+    return Math.round(n);
+  };
+
+  const submit = async () => {
+    setErr(null);
+
+    const payload: { part1NumCorrect?: number; part2NumCorrect?: number } = {};
+    if (editable1) {
+      const v = validate(nc1, p1!.numQuestions ?? 0);
+      if (v === null) { setErr(`Part 1: 0..${p1!.numQuestions} хооронд тоо оруулна уу`); return; }
+      if (v !== (p1!.numCorrect ?? -1)) payload.part1NumCorrect = v;
+    }
+    if (editable2) {
+      const v = validate(nc2, p2!.numQuestions ?? 0);
+      if (v === null) { setErr(`Part 2: 0..${p2!.numQuestions} хооронд тоо оруулна уу`); return; }
+      if (v !== (p2!.numCorrect ?? -1)) payload.part2NumCorrect = v;
+    }
+
+    if (payload.part1NumCorrect === undefined && payload.part2NumCorrect === undefined) {
+      setErr("Юу ч өөрчлөгдөөгүй байна");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/teacher/students/results/${encodeURIComponent(target.item.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Алдаа гарлаа");
+
+      const patch: Partial<HistoryItem> = {
+        total: Number((json.score as number).toFixed(1)),
+      };
+      const newP1 = json.part1 as { numQuestions: number | null; numCorrect: number | null; percentCorrect: number | null } | null;
+      const newP2 = json.part2 as { numQuestions: number | null; numCorrect: number | null; percentCorrect: number | null } | null;
+      if (newP1) {
+        patch.part1 = typeof newP1.percentCorrect === "number" ? Number(newP1.percentCorrect.toFixed(1)) : undefined;
+        patch.part1Stats = { numQuestions: newP1.numQuestions, numCorrect: newP1.numCorrect } as PartStatsView;
+      }
+      if (newP2) {
+        patch.part2 = typeof newP2.percentCorrect === "number" ? Number(newP2.percentCorrect.toFixed(1)) : undefined;
+        patch.part2Stats = { numQuestions: newP2.numQuestions, numCorrect: newP2.numCorrect } as PartStatsView;
+      }
+
+      onSaved(patch);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Алдаа");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border border-stroke rounded-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-base">Дүн засах</h3>
+            <p className="text-xs text-muted mt-0.5">
+              {target.subject} • {target.item.date || "—"}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-text p-1 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {!editable1 && !editable2 && (
+          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+            Part 1, Part 2 мэдээлэл байхгүй учир засах боломжгүй.
+          </div>
+        )}
+
+        {editable1 && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-muted">
+              Part 1 — зөв хариулт (нийт {p1!.numQuestions} асуултаас)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={p1!.numQuestions ?? 0}
+              value={nc1}
+              onChange={(e) => setNc1(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-card2 border border-stroke text-text text-sm focus:outline-none focus:border-indigo-500/40"
+              placeholder="0"
+            />
+          </div>
+        )}
+
+        {editable2 && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-muted">
+              Part 2 — зөв хариулт (нийт {p2!.numQuestions} асуултаас)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={p2!.numQuestions ?? 0}
+              value={nc2}
+              onChange={(e) => setNc2(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-card2 border border-stroke text-text text-sm focus:outline-none focus:border-indigo-500/40"
+              placeholder="0"
+            />
+          </div>
+        )}
+
+        {err && (
+          <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+            {err}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-3 py-2 rounded-lg border border-stroke bg-card2 text-text text-sm font-bold hover:bg-card disabled:opacity-50"
+          >
+            Болих
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving || (!editable1 && !editable2)}
+            className="px-3 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            Хадгалах
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────── Main Dashboard ─────────────── */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 цаг
 
@@ -207,7 +382,10 @@ export default function TeacherResultsDashboard() {
     data: resultsData,
     lastFetchedAt: resultsFetchedAt,
     setBulkResults,
+    updateHistoryItem,
   } = useResultsStore();
+
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
 
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingResults, setLoadingResults] = useState(false);
@@ -444,6 +622,18 @@ export default function TeacherResultsDashboard() {
         </div>
       )}
 
+      {/* ── Edit Modal ── */}
+      {editTarget && user && (
+        <EditResultModal
+          target={editTarget}
+          getToken={() => user.getIdToken()}
+          onClose={() => setEditTarget(null)}
+          onSaved={(patch) => {
+            updateHistoryItem(editTarget.studentId, editTarget.subject, editTarget.item.id, patch);
+          }}
+        />
+      )}
+
       {/* ── Charts ── */}
       {selectedResults && subjects.length > 0 && (
         <div className="space-y-4">
@@ -490,20 +680,57 @@ export default function TeacherResultsDashboard() {
                         <th className="px-3 py-2">Нийт (%)</th>
                         <th className="px-3 py-2">Part 1</th>
                         <th className="px-3 py-2">Part 2</th>
+                        <th className="px-3 py-2 w-12"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedResults.results[activeSubject].history.map((h, i) => (
-                        <tr key={i} className="border-b border-stroke hover:bg-card2/50">
-                          <td className="px-3 py-2 font-mono text-xs">{h.date || "—"}</td>
-                          <td className="px-3 py-2 font-bold" style={{ color: scoreColor(h.total) }}>{h.total}%</td>
-                          <td className="px-3 py-2 text-muted">{h.part1 != null ? `${h.part1}%` : "—"}</td>
-                          <td className="px-3 py-2 text-muted">{h.part2 != null ? `${h.part2}%` : "—"}</td>
-                        </tr>
-                      ))}
+                      {selectedResults.results[activeSubject].history.map((h) => {
+                        const canEdit =
+                          ((h.part1Stats?.numQuestions ?? 0) > 0) ||
+                          ((h.part2Stats?.numQuestions ?? 0) > 0);
+                        return (
+                          <tr key={h.id} className="border-b border-stroke hover:bg-card2/50">
+                            <td className="px-3 py-2 font-mono text-xs">{h.date || "—"}</td>
+                            <td className="px-3 py-2 font-bold" style={{ color: scoreColor(h.total) }}>{h.total}%</td>
+                            <td className="px-3 py-2 text-muted">
+                              {h.part1 != null ? `${h.part1}%` : "—"}
+                              {h.part1Stats && (h.part1Stats.numQuestions ?? 0) > 0 && (
+                                <span className="ml-1 text-xs opacity-60">
+                                  ({h.part1Stats.numCorrect ?? 0}/{h.part1Stats.numQuestions})
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-muted">
+                              {h.part2 != null ? `${h.part2}%` : "—"}
+                              {h.part2Stats && (h.part2Stats.numQuestions ?? 0) > 0 && (
+                                <span className="ml-1 text-xs opacity-60">
+                                  ({h.part2Stats.numCorrect ?? 0}/{h.part2Stats.numQuestions})
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {canEdit && (
+                                <button
+                                  onClick={() =>
+                                    setEditTarget({
+                                      studentId,
+                                      subject: activeSubject,
+                                      item: h,
+                                    })
+                                  }
+                                  className="p-1.5 rounded-md border border-stroke bg-card2 text-muted hover:text-indigo-300 hover:border-indigo-500/40 hover:bg-indigo-500/10 transition-all"
+                                  title="Дүн засах"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {selectedResults.results[activeSubject].history.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="px-3 py-4 text-muted text-center">Мэдээлэл алга</td>
+                          <td colSpan={5} className="px-3 py-4 text-muted text-center">Мэдээлэл алга</td>
                         </tr>
                       )}
                     </tbody>

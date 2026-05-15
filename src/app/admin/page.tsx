@@ -170,6 +170,29 @@ function UsersManagement() {
     isOpen: false, userToUpdate: null, newRole: null
   });
   const [isChangingRole, setIsChangingRole] = useState<boolean>(false);
+  const [backfilling, setBackfilling] = useState(false);
+
+  const handleBackfillRoles = async () => {
+    if (!user) return;
+    if (!window.confirm("Бүх хэрэглэгчдийн имэйлийг сурагчийн бүртгэлтэй тулгаж parent/student role автоматаар оноох уу?")) return;
+    setBackfilling(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch("/api/admin/backfill-roles", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Алдаа гарлаа");
+      const r = data.results;
+      showToast(`Дууслаа — parent: ${r.parent}, student: ${r.student}, алгасав: ${r.skipped}, алдаа: ${r.errors}`, "success");
+      await fetchUsers();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Алдаа гарлаа", "error");
+    } finally {
+      setBackfilling(false);
+    }
+  };
 
   // 🔎 Хайх + шүүлтүүр
   const [query, setQuery] = useState("");
@@ -281,14 +304,24 @@ function UsersManagement() {
 
   return (
     <>
-      <div className="flex items-center gap-3 mb-6">
-        <div className="bg-primary-bg/10 p-2 rounded-lg border border-primary-bg/20">
-          <Users className="w-6 h-6 text-primary-bg" />
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <div className="flex items-center gap-3">
+          <div className="bg-primary-bg/10 p-2 rounded-lg border border-primary-bg/20">
+            <Users className="w-6 h-6 text-primary-bg" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold">Хэрэглэгчийн удирдлага</h1>
+            <p className="text-sm text-muted">Firebase Auth дахь хэрэглэгчдийн роль солих.</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-bold">Хэрэглэгчийн удирдлага</h1>
-          <p className="text-sm text-muted">Firebase Auth дахь хэрэглэгчдийн роль солих.</p>
-        </div>
+        <button
+          onClick={handleBackfillRoles}
+          disabled={backfilling}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm font-bold hover:bg-yellow-500/20 disabled:opacity-50"
+        >
+          {backfilling ? <Loader2 className="animate-spin h-4 w-4" /> : <ShieldQuestion className="h-4 w-4" />}
+          {backfilling ? "Тулгаж байна…" : "Эцэг эх автоматаар тулгах"}
+        </button>
       </div>
 
       {/* 🔎 Хайх & Шүүх мөр */}
